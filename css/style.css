@@ -32,7 +32,7 @@ body {
 #app {
   max-width: 900px;
   margin: 0 auto;
-  padding: 20px 16px 60px;
+  padding: 20px 16px 120px;
   position: relative;
 }
 
@@ -175,6 +175,7 @@ header h1 {
 .location-info h2 { font-size: 1.6rem; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .local-time { font-size: 0.95rem; font-weight: 400; color: var(--accent); }
 .location-info p { color: var(--text-dim); font-size: 0.9rem; margin-top: 2px; }
+.greeting { font-size: 1.8rem; font-weight: 700; color: var(--text); text-align: center; margin-bottom: 8px; }
 
 .current-main {
   text-align: center;
@@ -189,7 +190,7 @@ header h1 {
 
 .current-details {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 12px;
 }
 .detail-card {
@@ -221,6 +222,36 @@ header h1 {
   grid-template-columns: repeat(4, 1fr);
   gap: 12px;
 }
+
+/* ── Sunset & Sunrise Score ── */
+#sun-score-section {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: var(--shadow);
+  margin-bottom: 20px;
+}
+#sun-score-section h3 { margin-bottom: 16px; font-size: 1.1rem; }
+.score-grid {
+  grid-template-columns: repeat(2, 1fr);
+}
+.score-card-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.score-value {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #f8cdd9;
+  line-height: 1.2;
+}
+.score-text {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
 .sun-card {
   background: rgba(220, 160, 180, 0.15);
   border-radius: 10px;
@@ -239,12 +270,12 @@ header h1 {
   margin-bottom: 20px;
 }
 #moon-phase h3 { margin-bottom: 16px; font-size: 1.1rem; }
-.moon-display { display: flex; align-items: center; gap: 20px; }
+.moon-display { display: flex; align-items: center; justify-content: center; gap: 20px; flex-wrap: wrap; }
 .moon-icon-lg { font-size: 3.5rem; }
-.moon-info { display: flex; flex-direction: column; gap: 4px; }
+.moon-info { display: flex; flex-direction: column; gap: 4px; text-align: center; }
 .moon-name { font-size: 1.2rem; font-weight: 600; }
 .moon-detail { font-size: 0.9rem; color: var(--text-dim); }
-.moon-times { display: flex; gap: 16px; margin-left: 32px; }
+.moon-times { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; width: 100%; }
 
 /* ── Collapsible Sections ── */
 .section-header-toggle {
@@ -266,6 +297,21 @@ header h1 {
   margin: 0;
   padding: 0;
 }
+
+/* ── Section drag-and-drop ── */
+.section-drag-handle {
+  cursor: grab;
+  opacity: 0.4;
+  margin-right: 8px;
+  font-size: 1rem;
+  vertical-align: middle;
+  user-select: none;
+  transition: opacity 0.2s;
+}
+.section-drag-handle:hover { opacity: 0.8; }
+.section-drag-handle:active { cursor: grabbing; }
+.section-dragging { opacity: 0.4; transform: scale(0.98); transition: opacity 0.15s, transform 0.15s; }
+.section-drag-over { box-shadow: 0 0 0 2px #f8cdd9; transition: box-shadow 0.15s; }
 
 /* ── Hourly ── */
 #hourly-section {
@@ -398,6 +444,7 @@ canvas { width: 100% !important; border-radius: 8px; }
 /* ── Responsive ── */
 @media (max-width: 600px) {
   .sun-grid { grid-template-columns: repeat(2, 1fr); }
+  .score-grid { grid-template-columns: repeat(2, 1fr); }
   .daily-row { grid-template-columns: 70px 30px 1fr 55px 55px; font-size: 0.8rem; }
   .current-details { grid-template-columns: repeat(2, 1fr); }
   #city-input { width: 160px; }

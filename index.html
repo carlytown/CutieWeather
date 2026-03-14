@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Weather App</title>
+  <title>CutieWeather</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌸</text></svg>">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -32,6 +33,7 @@
         <p id="current-date"></p>
       </div>
       <div class="current-main">
+        <p id="greeting" class="greeting"></p>
         <div class="current-temp-block">
           <span id="weather-icon" class="weather-icon-lg"></span>
           <span id="current-temp" class="big-temp"></span>
@@ -57,10 +59,6 @@
           <span id="precip" class="detail-value"></span>
         </div>
         <div class="detail-card">
-          <span class="detail-label">Pressure</span>
-          <span id="pressure" class="detail-value"></span>
-        </div>
-        <div class="detail-card">
           <span class="detail-label">Current UV</span>
           <span id="uv-current" class="detail-value"></span>
         </div>
@@ -71,6 +69,10 @@
         <div class="detail-card">
           <span class="detail-label">Cloud Cover</span>
           <span id="cloud-cover" class="detail-value"></span>
+        </div>
+        <div class="detail-card">
+          <span class="detail-label">Air Quality</span>
+          <span id="aqi" class="detail-value"></span>
         </div>
       </div>
     </section>
@@ -95,6 +97,33 @@
         <div class="sun-card">
           <span class="sun-label">Dusk</span>
           <span id="dusk" class="sun-value"></span>
+        </div>
+      </div>
+      </div>
+    </section>
+
+    <!-- Sunset & Sunrise Score -->
+    <section id="sun-score-section" class="hidden glass">
+      <h3>Sunset & Sunrise Score <span id="score-tz" style="font-weight:400;color:var(--text-dim);font-size:0.85rem"></span></h3>
+      <div class="section-body">
+      <div class="sun-grid score-grid">
+        <div class="sun-card score-card-item">
+          <span class="sun-label">Sunrise Quality</span>
+          <span id="sunrise-score-num" class="score-value">—</span>
+          <span id="sunrise-quality-text" class="score-text"></span>
+        </div>
+        <div class="sun-card score-card-item">
+          <span class="sun-label">Sunset Quality</span>
+          <span id="sunset-score-num" class="score-value">—</span>
+          <span id="sunset-quality-text" class="score-text"></span>
+        </div>
+        <div class="sun-card">
+          <span class="sun-label">Golden Hour AM</span>
+          <span id="golden-morning" class="sun-value"></span>
+        </div>
+        <div class="sun-card">
+          <span class="sun-label">Golden Hour PM</span>
+          <span id="golden-evening" class="sun-value"></span>
         </div>
       </div>
       </div>

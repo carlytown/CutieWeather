@@ -1208,13 +1208,13 @@
   function formatTime(isoStr, timeZone) {
     if (!isoStr) return "—";
     const d = new Date(isoStr);
-    const opts = { hour: "2-digit", minute: "2-digit" };
+    const opts = { hour: "2-digit", minute: "2-digit", hour12: !use24h };
     if (timeZone) opts.timeZone = timeZone;
     return d.toLocaleTimeString(undefined, opts);
   }
   function formatHour(isoStr, timeZone) {
     const d = new Date(isoStr);
-    const opts = { hour: "2-digit", minute: "2-digit" };
+    const opts = { hour: "2-digit", minute: "2-digit", hour12: !use24h };
     if (timeZone) opts.timeZone = timeZone;
     return d.toLocaleTimeString(undefined, opts);
   }
@@ -1377,7 +1377,24 @@
       use24h = !use24h;
       localStorage.setItem("weather_use24h", use24h);
       updateLocalTime();
+      if (weatherCache) {
+        renderSunTimes(weatherCache);
+        renderMoonPhase(weatherCache);
+        renderHourly(weatherCache);
+      }
     };
+
+    // Greeting based on local time
+    try {
+      const now = new Date();
+      const localHourForGreeting = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(now), 10);
+      let greeting;
+      if (localHourForGreeting >= 5 && localHourForGreeting < 12) greeting = "Good morning! 🌸";
+      else if (localHourForGreeting >= 12 && localHourForGreeting < 17) greeting = "Good afternoon! ☀️";
+      else if (localHourForGreeting >= 17 && localHourForGreeting < 21) greeting = "Good evening! 🌷";
+      else greeting = "Good night! ✨";
+      $("#greeting").textContent = greeting;
+    } catch (_) { $("#greeting").textContent = ""; }
 
     $("#current-date").textContent = new Date().toLocaleDateString(undefined, {
       weekday: "long",
@@ -1393,13 +1410,36 @@
     $("#wind").textContent = speedStr(c.wind_speed_10m);
     $("#wind-dir").textContent = `${degToCompass(c.wind_direction_10m)} (${Math.round(c.wind_direction_10m)}°)`;
     $("#precip").textContent = precipStr(c.precipitation);
-    $("#pressure").textContent = `${c.surface_pressure.toFixed(0)} hPa`;
     $("#cloud-cover").textContent = `${c.cloud_cover}%`;
     $("#uv-current").textContent = data.current.uv_index.toFixed(1);
     $("#uv-index").textContent = d.uv_index_max[0].toFixed(1);
 
+    // Fetch AQI from Open-Meteo air quality API
+    $("#aqi").textContent = "—";
+    fetchAQI(data.latitude, data.longitude);
+
     show($("#current-weather"));
     setupDetailDrag();
+  }
+
+  async function fetchAQI(lat, lon) {
+    try {
+      const url = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=us_aqi`;
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.current && data.current.us_aqi != null) {
+        const aqi = Math.round(data.current.us_aqi);
+        let label;
+        if (aqi <= 50) label = "Good";
+        else if (aqi <= 100) label = "Moderate";
+        else if (aqi <= 150) label = "Unhealthy (SG)";
+        else if (aqi <= 200) label = "Unhealthy";
+        else if (aqi <= 300) label = "Very Unhealthy";
+        else label = "Hazardous";
+        $("#aqi").textContent = `${aqi} · ${label}`;
+      }
+    } catch (_) {}
   }
 
   // ── Drag-and-drop for detail cards ──
@@ -1526,6 +1566,9 @@
     if (m) {
       let h = parseInt(m[1], 10);
       const min = m[2];
+      if (use24h) {
+        return `${String(h).padStart(2, "0")}:${min}`;
+      }
       const ampm = h >= 12 ? "PM" : "AM";
       if (h === 0) h = 12;
       else if (h > 12) h -= 12;
@@ -1577,6 +1620,9 @@
       if (totalMin >= 1440) totalMin -= 1440;
       const h = Math.floor(totalMin / 60);
       const min = totalMin % 60;
+      if (use24h) {
+        return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+      }
       const ampm = h >= 12 ? "PM" : "AM";
       const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
       return `${h12}:${String(min).padStart(2, "0")} ${ampm}`;
@@ -1595,6 +1641,118 @@
     } catch (_) { $("#sun-tz").textContent = ""; }
 
     show($("#sun-times"));
+  }
+
+  // ── Sunsethue API: Sunset & Sunrise Quality Score ──
+  const SUNSETHUE_API_KEY = "daeed223612ebeaf08776fd7ae76d733";
+
+  function scoreToColor(quality) {
+    if (quality < 0.25) return "#a0a0b0";
+    if (quality < 0.5) return "#f8cdd9";
+    if (quality < 0.75) return "#f0a060";
+    return "#ffd700";
+  }
+
+  function setScore(numEl, qualityEl, quality, qualityText) {
+    const color = scoreToColor(quality);
+    numEl.textContent = `${Math.round(quality * 100)}%`;
+    numEl.style.color = color;
+    qualityEl.textContent = qualityText;
+    qualityEl.style.color = color;
+  }
+
+  function formatSunsethueTime(isoStr) {
+    if (!isoStr) return "—";
+    const d = new Date(isoStr);
+    const opts = { hour: "2-digit", minute: "2-digit", hour12: !use24h };
+    return d.toLocaleTimeString(undefined, opts);
+  }
+
+  async function fetchSunScore(lat, lon, date, type) {
+    const url = `https://api.sunsethue.com/event?latitude=${lat}&longitude=${lon}&date=${date}&type=${type}&key=${encodeURIComponent(SUNSETHUE_API_KEY)}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return res.json();
+  }
+
+  async function renderSunScore(data) {
+    const section = $("#sun-score-section");
+    const d = data.daily;
+    const sunrise = d.sunrise[0];
+    const sunset = d.sunset[0];
+    const lat = data.latitude;
+    const lon = data.longitude;
+    const dateStr = d.time[0]; // "YYYY-MM-DD"
+
+    // Fall back to computed golden hours if API fails
+    function offsetTime(isoStr, offsetMin) {
+      const m = isoStr.match(/T(\d{2}):(\d{2})/);
+      if (!m) return null;
+      let totalMin = parseInt(m[1], 10) * 60 + parseInt(m[2], 10) + offsetMin;
+      if (totalMin < 0) totalMin += 1440;
+      if (totalMin >= 1440) totalMin -= 1440;
+      const h = Math.floor(totalMin / 60);
+      const min = totalMin % 60;
+      if (use24h) {
+        return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+      }
+      const ampm = h >= 12 ? "PM" : "AM";
+      const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+      return `${h12}:${String(min).padStart(2, "0")} ${ampm}`;
+    }
+
+    // Set fallback golden hours (computed) while API loads
+    $("#golden-morning").textContent = `${formatTimeRaw(sunrise)} – ${offsetTime(sunrise, 30) || "—"}`;
+    $("#golden-evening").textContent = `${offsetTime(sunset, -30) || "—"} – ${formatTimeRaw(sunset)}`;
+    $("#sunrise-score-num").textContent = "—";
+    $("#sunset-score-num").textContent = "—";
+    $("#sunrise-quality-text").textContent = "";
+    $("#sunset-quality-text").textContent = "";
+
+    // Show timezone abbreviation
+    try {
+      const tz = data.timezone;
+      const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "short" }).formatToParts(new Date());
+      const tzAbbr = parts.find(p => p.type === "timeZoneName");
+      $("#score-tz").textContent = tzAbbr ? `(${tzAbbr.value})` : "";
+    } catch (_) { $("#score-tz").textContent = ""; }
+
+    show(section);
+
+    // Fetch both scores in parallel
+    try {
+      const [srData, ssData] = await Promise.all([
+        fetchSunScore(lat, lon, dateStr, "sunrise"),
+        fetchSunScore(lat, lon, dateStr, "sunset"),
+      ]);
+
+      if (srData && srData.data) {
+        const sr = srData.data;
+        setScore(
+          $("#sunrise-score-num"), $("#sunrise-quality-text"),
+          sr.quality, sr.quality_text
+        );
+        // Golden hour from API if available
+        if (sr.magics && sr.magics.golden_hour) {
+          const [gs, ge] = sr.magics.golden_hour;
+          $("#golden-morning").textContent = `${formatSunsethueTime(gs)} – ${formatSunsethueTime(ge)}`;
+        }
+      }
+
+      if (ssData && ssData.data) {
+        const ss = ssData.data;
+        setScore(
+          $("#sunset-score-num"), $("#sunset-quality-text"),
+          ss.quality, ss.quality_text
+        );
+        if (ss.magics && ss.magics.golden_hour) {
+          const [gs, ge] = ss.magics.golden_hour;
+          $("#golden-evening").textContent = `${formatSunsethueTime(gs)} – ${formatSunsethueTime(ge)}`;
+        }
+      }
+    } catch (_) {
+      // API unavailable — section still shows with computed golden hours
+    }
   }
 
   // ── Moon phase calculation ──
@@ -1819,7 +1977,7 @@
     } else if (feelsF <= 45) {
       items.push({ icon: "🧣", text: "<strong>Warm jacket or coat with layers.</strong> A scarf and light gloves are a good idea." });
     } else if (feelsF <= 55) {
-      items.push({ icon: "🧶", text: "<strong>Sweater or fleece with a light jacket.</strong> Cool enough to want a layer." });
+      items.push({ icon: "👔", text: "<strong>Sweater or fleece with a light jacket.</strong> Cool enough to want a layer." });
     } else if (feelsF <= 65) {
       items.push({ icon: "👕", text: "<strong>Long sleeves or a light layer.</strong> Comfortable but slightly cool." });
     } else if (feelsF <= 75) {
@@ -2082,7 +2240,7 @@
 
     // Hide everything first
     [
-      "#current-weather", "#sun-times", "#moon-phase", "#hourly-section",
+      "#current-weather", "#sun-times", "#sun-score-section", "#moon-phase", "#hourly-section",
       "#forecast-section", "#attire-section", "#zodiac-section",
     ].forEach((s) => hide($(s)));
 
@@ -2090,6 +2248,7 @@
     renderBackgroundGradient(data);
     renderWeatherFX(data, name);
     renderSunTimes(data);
+    renderSunScore(data);
     renderMoonPhase(data);
     renderHourly(data);
     renderDaily(data, forecastDays);
@@ -2338,14 +2497,55 @@
     [39.4087, -79.4072, "Swallow Falls, Maryland, USA"],
   ];
   let lastRandomIdx = -1;
-  $("#random-btn").addEventListener("click", () => {
+  function triggerRandomCity() {
     let idx;
     do { idx = Math.floor(Math.random() * WORLD_CITIES.length); } while (idx === lastRandomIdx && WORLD_CITIES.length > 1);
     lastRandomIdx = idx;
     const city = WORLD_CITIES[idx];
     cityInput.value = city[2].split(",")[0];
     loadWeather(city[0], city[1], city[2]);
-  });
+  }
+  $("#random-btn").addEventListener("click", triggerRandomCity);
+
+  // ── Shake to get random city (mobile) ──
+  let shakeLastTime = 0;
+  let shakeLastX = 0, shakeLastY = 0, shakeLastZ = 0;
+  const SHAKE_THRESHOLD = 25;
+  const SHAKE_COOLDOWN = 1500;
+
+  function handleShake(e) {
+    const acc = e.accelerationIncludingGravity;
+    if (!acc) return;
+    const now = Date.now();
+    if (now - shakeLastTime < SHAKE_COOLDOWN) return;
+    const dx = acc.x - shakeLastX;
+    const dy = acc.y - shakeLastY;
+    const dz = acc.z - shakeLastZ;
+    const force = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    shakeLastX = acc.x;
+    shakeLastY = acc.y;
+    shakeLastZ = acc.z;
+    if (force > SHAKE_THRESHOLD) {
+      shakeLastTime = now;
+      triggerRandomCity();
+    }
+  }
+
+  if (window.DeviceMotionEvent) {
+    if (typeof DeviceMotionEvent.requestPermission === "function") {
+      // iOS 13+ requires permission — request on first touch
+      document.addEventListener("touchstart", function iosMotionPermission() {
+        DeviceMotionEvent.requestPermission().then((state) => {
+          if (state === "granted") {
+            window.addEventListener("devicemotion", handleShake);
+          }
+        }).catch(() => {});
+        document.removeEventListener("touchstart", iosMotionPermission);
+      }, { once: true });
+    } else {
+      window.addEventListener("devicemotion", handleShake);
+    }
+  }
 
   // ── Unit toggle (click temperature) ──
   $("#current-temp").addEventListener("click", () => {
@@ -2358,7 +2558,9 @@
   // ── Collapsible sections ──
   document.querySelectorAll(".glass h3").forEach((h3) => {
     h3.classList.add("section-header-toggle");
-    h3.addEventListener("click", () => {
+    h3.addEventListener("click", (e) => {
+      // Don't collapse when dragging the grip handle
+      if (e.target.classList.contains("section-drag-handle")) return;
       const body = h3.closest("section").querySelector(".section-body");
       if (!body) return;
       h3.classList.toggle("collapsed");
@@ -2375,6 +2577,100 @@
       }
     });
   });
+
+  // ── Drag-and-drop section reordering ──
+  (function setupSectionDrag() {
+    const container = $("#app");
+    const sectionIds = [
+      "sun-times", "sun-score-section", "moon-phase", "hourly-section",
+      "forecast-section", "attire-section", "zodiac-section",
+    ];
+    const sections = sectionIds.map(id => $(`#${id}`)).filter(Boolean);
+
+    // Add drag handle to each reorderable section
+    sections.forEach(sec => {
+      const h3 = sec.querySelector("h3");
+      if (!h3) return;
+      const handle = document.createElement("span");
+      handle.className = "section-drag-handle";
+      handle.textContent = "⠿";
+      handle.title = "Drag to reorder";
+      h3.prepend(handle);
+    });
+
+    // Restore saved order
+    try {
+      const saved = JSON.parse(localStorage.getItem("section_order"));
+      if (saved && saved.length === sectionIds.length) {
+        // Find the anchor: current-weather section
+        const anchor = $("#current-weather");
+        let ref = anchor;
+        saved.forEach(id => {
+          const el = $(`#${id}`);
+          if (el) {
+            ref.after(el);
+            ref = el;
+          }
+        });
+      }
+    } catch (_) {}
+
+    let dragSection = null;
+
+    sections.forEach(sec => {
+      const handle = sec.querySelector(".section-drag-handle");
+      if (!handle) return;
+      sec.draggable = false; // only drag via handle
+
+      handle.addEventListener("mousedown", () => { sec.draggable = true; });
+      handle.addEventListener("touchstart", () => { sec.draggable = true; }, { passive: true });
+      document.addEventListener("mouseup", () => { sec.draggable = false; });
+      document.addEventListener("touchend", () => { sec.draggable = false; });
+
+      sec.addEventListener("dragstart", (e) => {
+        dragSection = sec;
+        sec.classList.add("section-dragging");
+        e.dataTransfer.effectAllowed = "move";
+      });
+
+      sec.addEventListener("dragend", () => {
+        sec.classList.remove("section-dragging");
+        sections.forEach(s => s.classList.remove("section-drag-over"));
+        dragSection = null;
+        sec.draggable = false;
+        // Save order
+        const order = [...container.querySelectorAll("section.glass")]
+          .map(s => s.id)
+          .filter(id => sectionIds.includes(id));
+        try { localStorage.setItem("section_order", JSON.stringify(order)); } catch (_) {}
+      });
+
+      sec.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        if (sec !== dragSection) sec.classList.add("section-drag-over");
+      });
+
+      sec.addEventListener("dragleave", () => {
+        sec.classList.remove("section-drag-over");
+      });
+
+      sec.addEventListener("drop", (e) => {
+        e.preventDefault();
+        sec.classList.remove("section-drag-over");
+        if (dragSection && dragSection !== sec) {
+          const allSections = [...container.querySelectorAll("section.glass")].filter(s => sectionIds.includes(s.id));
+          const fromIdx = allSections.indexOf(dragSection);
+          const toIdx = allSections.indexOf(sec);
+          if (fromIdx < toIdx) {
+            sec.after(dragSection);
+          } else {
+            sec.parentNode.insertBefore(dragSection, sec);
+          }
+        }
+      });
+    });
+  })();
 
   // ── Range toggle (7/14 days) ──
   document.querySelectorAll(".range-btn").forEach((btn) => {

@@ -16,13 +16,9 @@
         <input type="text" id="city-input" placeholder="Search city..." autocomplete="off">
         <button id="search-btn">Search</button>
         <button id="locate-btn" title="Use my location">&#9737;</button>
-      </div>
-      <div id="suggestions"></div>
-      <div id="unit-toggle">
-        <button class="unit-btn" data-unit="celsius">°C</button>
-        <button class="unit-btn active" data-unit="fahrenheit">°F</button>
         <button id="random-btn" title="Random city">🎲</button>
       </div>
+      <div id="suggestions"></div>
     </header>
 
     <!-- Loading / Error -->
@@ -81,7 +77,8 @@
 
     <!-- Sun Times -->
     <section id="sun-times" class="hidden glass">
-      <h3>Sun &amp; Twilight</h3>
+      <h3>Sun &amp; Twilight <span id="sun-tz" style="font-weight:400;color:var(--text-dim);font-size:0.85rem"></span></h3>
+      <div class="section-body">
       <div class="sun-grid">
         <div class="sun-card">
           <span class="sun-label">Dawn</span>
@@ -100,11 +97,13 @@
           <span id="dusk" class="sun-value"></span>
         </div>
       </div>
+      </div>
     </section>
 
     <!-- Moon Phase -->
     <section id="moon-phase" class="hidden glass">
-      <h3>Moon Phase</h3>
+      <h3>Moon Phase <span id="moon-tz" style="font-weight:400;color:var(--text-dim);font-size:0.85rem"></span></h3>
+      <div class="section-body">
       <div class="moon-display">
         <span id="moon-icon" class="moon-icon-lg"></span>
         <div class="moon-info">
@@ -122,12 +121,15 @@
           </div>
         </div>
       </div>
+      </div>
     </section>
 
     <!-- Hourly Forecast -->
     <section id="hourly-section" class="hidden glass">
       <h3>Hourly Forecast (48h)</h3>
+      <div class="section-body">
       <div id="hourly-scroll" class="hourly-scroll"></div>
+      </div>
     </section>
 
     <!-- Range Toggle -->
@@ -139,20 +141,26 @@
           <button class="range-btn" data-days="14">14 Days</button>
         </div>
       </div>
+      <div class="section-body">
       <div id="daily-forecast"></div>
+      </div>
     </section>
 
     <!-- What to Wear -->
     <section id="attire-section" class="hidden glass">
       <h3>What to Wear Today</h3>
+      <div class="section-body">
       <div id="attire-content" class="attire-content"></div>
+      </div>
     </section>
 
     <!-- Chinese Zodiac -->
     <section id="zodiac-section" class="hidden glass">
       <h3>Chinese Zodiac</h3>
+      <div class="section-body">
       <div id="zodiac-year" class="zodiac-year"></div>
       <div id="zodiac-lucky" class="zodiac-lucky"></div>
+      </div>
     </section>
 
   </div>

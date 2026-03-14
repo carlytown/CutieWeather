@@ -137,6 +137,16 @@
   let lightningTimer = null;
   let lightningBolt = null; // current bolt path to draw
   let swallowFallsMode = false; // Easter egg!
+  let fireworksMode = false; // July 4th USA fireworks
+  let fireworksShells = []; // active firework shells
+  let fireworksPreview = false; // set to true to preview fireworks now
+  let cherryBlossomMode = false; // cherry blossom season for VA/DC/MD
+  let blossomPetals = [];
+  let birthdaySparkleMode = false; // birthday confetti easter egg
+  let sparkleParticles = [];
+  let birthdaySparklePreview = false; // set to true to preview confetti now
+  let newYearSparkleMode = false; // New Year's sparkles
+  let nySparkleParticles = [];
 
   // Snow accumulation: array of heights per pixel column
   let snowAccum = [];
@@ -264,10 +274,18 @@
     fxCtx.clearRect(0, 0, W, H);
 
     if (!fxType || fxParticles.length === 0) {
-      if (!swallowFallsMode) {
+      if (!swallowFallsMode && !fireworksMode && !cherryBlossomMode && !birthdaySparkleMode && !newYearSparkleMode) {
         fxAnimId = requestAnimationFrame(animateFX);
         return;
       }
+    }
+
+    // July 4th fireworks
+    if (fireworksMode) {
+      drawFireworks(fxCtx, W, H);
+      if (cherryBlossomMode) drawCherryBlossoms(fxCtx, W, H);
+      fxAnimId = requestAnimationFrame(animateFX);
+      return;
     }
 
     // Easter egg: Swallow Falls food rain
@@ -460,6 +478,15 @@
       // Fade out
       lightningFlash = Math.max(0, lightningFlash - 0.04);
     }
+
+    // Cherry blossoms overlay (draws on top of weather)
+    if (cherryBlossomMode) drawCherryBlossoms(fxCtx, W, H);
+
+    // Birthday confetti overlay
+    if (birthdaySparkleMode) drawConfetti(fxCtx, W, H);
+
+    // New Year's sparkles overlay
+    if (newYearSparkleMode) drawNYSparkles(fxCtx, W, H);
 
     fxAnimId = requestAnimationFrame(animateFX);
   }
@@ -719,9 +746,335 @@
     }
   }
 
+  // ── Birthday confetti helpers ──
+  function spawnConfetti() {
+    sparkleParticles = [];
+    const W = fxCanvas.width;
+    const H = fxCanvas.height;
+    const count = 65;
+    const confettiColors = [
+      [255, 100, 130], // hot pink
+      [255, 180, 60],  // orange
+      [100, 200, 255], // sky blue
+      [180, 120, 255], // purple
+      [255, 220, 80],  // yellow
+      [120, 230, 150], // green
+      [255, 140, 200], // pink
+    ];
+    for (let i = 0; i < count; i++) {
+      const color = confettiColors[Math.floor(Math.random() * confettiColors.length)];
+      sparkleParticles.push({
+        x: Math.random() * W,
+        y: Math.random() * H - H,
+        w: 4 + Math.random() * 5,
+        h: 6 + Math.random() * 8,
+        r: color[0], g: color[1], b: color[2],
+        rotation: Math.random() * Math.PI * 2,
+        rotSpeed: (Math.random() - 0.5) * 0.08,
+        speed: 1 + Math.random() * 2,
+        drift: (Math.random() - 0.5) * 1.2,
+        wobble: Math.random() * Math.PI * 2,
+        wobbleSpeed: 0.02 + Math.random() * 0.03,
+        opacity: 0.6 + Math.random() * 0.4,
+        shape: Math.floor(Math.random() * 3), // 0=rect, 1=circle, 2=strip
+      });
+    }
+  }
+
+  function drawConfetti(ctx, W, H) {
+    for (const p of sparkleParticles) {
+      p.wobble += p.wobbleSpeed;
+      p.rotation += p.rotSpeed;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.globalAlpha = p.opacity;
+      ctx.fillStyle = `rgb(${p.r}, ${p.g}, ${p.b})`;
+      if (p.shape === 0) {
+        ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      } else if (p.shape === 1) {
+        ctx.beginPath();
+        ctx.arc(0, 0, p.w / 2, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillRect(-p.w / 2, -p.h / 4, p.w, p.h / 2);
+      }
+      ctx.globalAlpha = 1;
+      ctx.restore();
+      p.x += p.drift + Math.sin(p.wobble) * 0.5;
+      p.y += p.speed;
+      if (p.y > H + p.h) { p.y = -p.h * 2; p.x = Math.random() * W; }
+      if (p.x > W) p.x = 0;
+      if (p.x < 0) p.x = W;
+    }
+  }
+
+  // ── New Year sparkle helpers ──
+  function spawnNYSparkles() {
+    nySparkleParticles = [];
+    const W = fxCanvas.width;
+    const H = fxCanvas.height;
+    const count = 35;
+    for (let i = 0; i < count; i++) {
+      nySparkleParticles.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        size: 2 + Math.random() * 4,
+        twinkleSpeed: 0.02 + Math.random() * 0.04,
+        twinklePhase: Math.random() * Math.PI * 2,
+        drift: (Math.random() - 0.5) * 0.3,
+        fall: 0.1 + Math.random() * 0.3,
+        hue: Math.floor(Math.random() * 4),
+      });
+    }
+  }
+
+  function drawNYSparkles(ctx, W, H) {
+    const colors = [
+      [255, 215, 100], // gold
+      [210, 220, 240], // silver
+      [255, 180, 210], // pink
+      [255, 255, 255], // white
+    ];
+    for (const p of nySparkleParticles) {
+      p.twinklePhase += p.twinkleSpeed;
+      const alpha = 0.3 + Math.abs(Math.sin(p.twinklePhase)) * 0.7;
+      const [r, g, b] = colors[p.hue];
+      const s = p.size * (0.6 + Math.abs(Math.sin(p.twinklePhase)) * 0.4);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, -s); ctx.lineTo(0, s); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-s, 0); ctx.lineTo(s, 0); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-s * 0.5, -s * 0.5); ctx.lineTo(s * 0.5, s * 0.5); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(s * 0.5, -s * 0.5); ctx.lineTo(-s * 0.5, s * 0.5); ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, 0, s * 0.2, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`; ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.restore();
+      p.x += p.drift;
+      p.y += p.fall;
+      if (p.y > H + p.size) { p.y = -p.size * 2; p.x = Math.random() * W; }
+      if (p.x > W) p.x = 0;
+      if (p.x < 0) p.x = W;
+    }
+  }
+
+  // ── Cherry blossom helpers ──
+  function spawnBlossomPetals() {
+    blossomPetals = [];
+    const W = fxCanvas.width;
+    const H = fxCanvas.height;
+    const count = 40;
+    for (let i = 0; i < count; i++) {
+      blossomPetals.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        size: 6 + Math.random() * 8,
+        speed: 0.4 + Math.random() * 0.8,
+        drift: 0.3 + Math.random() * 0.6,
+        wobble: Math.random() * Math.PI * 2,
+        wobbleSpeed: 0.008 + Math.random() * 0.015,
+        rotation: Math.random() * Math.PI * 2,
+        rotSpeed: (Math.random() - 0.5) * 0.02,
+        opacity: 0.25 + Math.random() * 0.35,
+        hue: Math.floor(Math.random() * 3), // 0 = soft pink, 1 = pale pink, 2 = near-white
+      });
+    }
+  }
+
+  function drawBlossomPetal(ctx, x, y, size, rotation, opacity, hue) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rotation);
+    ctx.globalAlpha = opacity;
+    const fills = [
+      [255, 183, 197], // soft pink
+      [255, 210, 220], // pale pink
+      [255, 228, 235], // near-white pink
+    ];
+    const [r, g, b] = fills[hue % fills.length];
+    // Single petal: wide rounded teardrop shape
+    ctx.beginPath();
+    ctx.moveTo(0, -size * 0.55);
+    ctx.bezierCurveTo(size * 0.45, -size * 0.45, size * 0.5, size * 0.2, 0, size * 0.55);
+    ctx.bezierCurveTo(-size * 0.5, size * 0.2, -size * 0.45, -size * 0.45, 0, -size * 0.55);
+    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  function drawCherryBlossoms(ctx, W, H) {
+    for (const p of blossomPetals) {
+      p.wobble += p.wobbleSpeed;
+      p.rotation += p.rotSpeed;
+      drawBlossomPetal(ctx, p.x, p.y, p.size, p.rotation, p.opacity, p.hue);
+      p.x += p.drift + Math.sin(p.wobble) * 0.4;
+      p.y += p.speed;
+      if (p.y > H + p.size) { p.y = -p.size * 2; p.x = Math.random() * W; }
+      if (p.x > W + p.size) p.x = -p.size;
+    }
+  }
+
+  // ── Fireworks helpers ──
+  function launchFirework(W, H) {
+    const x = W * (0.15 + Math.random() * 0.7);
+    const peakY = H * (0.1 + Math.random() * 0.3);
+    const colors = [
+      [255, 80, 80], [255, 255, 100], [100, 180, 255],
+      [255, 140, 200], [120, 255, 120], [255, 200, 80],
+      [200, 130, 255], [255, 255, 255],
+    ];
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    return {
+      x, y: H, peakY, speed: 5 + Math.random() * 4,
+      phase: "rise", // "rise" | "burst" | "done"
+      color, sparks: [], trailParticles: [],
+      burstSize: 120 + Math.random() * 120,
+    };
+  }
+
+  function burstFirework(shell) {
+    const count = 100 + Math.floor(Math.random() * 60);
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 2 + Math.random() * shell.burstSize / 15;
+      shell.sparks.push({
+        x: shell.x, y: shell.y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 1,
+        decay: 0.005 + Math.random() * 0.008,
+        r: shell.color[0], g: shell.color[1], b: shell.color[2],
+      });
+    }
+    shell.phase = "burst";
+  }
+
+  function drawFireworks(ctx, W, H) {
+    // Launch new shells periodically
+    if (Math.random() < 0.02) {
+      fireworksShells.push(launchFirework(W, H));
+    }
+
+    for (let i = fireworksShells.length - 1; i >= 0; i--) {
+      const s = fireworksShells[i];
+      if (s.phase === "rise") {
+        // Draw rising trail
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 3, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${s.color[0]}, ${s.color[1]}, ${s.color[2]}, 0.9)`;
+        ctx.shadowColor = `rgba(${s.color[0]}, ${s.color[1]}, ${s.color[2]}, 0.6)`;
+        ctx.shadowBlur = 8;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        // Trail particles
+        s.trailParticles.push({
+          x: s.x + (Math.random() - 0.5) * 2,
+          y: s.y,
+          life: 1, decay: 0.04,
+        });
+        s.y -= s.speed;
+        if (s.y <= s.peakY) burstFirework(s);
+      } else if (s.phase === "burst") {
+        let allDead = true;
+        for (const sp of s.sparks) {
+          if (sp.life <= 0) continue;
+          allDead = false;
+          ctx.beginPath();
+          ctx.arc(sp.x, sp.y, 2.5 + sp.life, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(${sp.r}, ${sp.g}, ${sp.b}, ${sp.life})`;
+          ctx.shadowColor = `rgba(${sp.r}, ${sp.g}, ${sp.b}, ${sp.life * 0.5})`;
+          ctx.shadowBlur = 12;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          sp.x += sp.vx;
+          sp.y += sp.vy;
+          sp.vy += 0.03; // gravity
+          sp.vx *= 0.99;
+          sp.life -= sp.decay;
+        }
+        if (allDead) s.phase = "done";
+      }
+      // Draw trail particles
+      for (let t = s.trailParticles.length - 1; t >= 0; t--) {
+        const tp = s.trailParticles[t];
+        tp.life -= tp.decay;
+        if (tp.life <= 0) { s.trailParticles.splice(t, 1); continue; }
+        ctx.beginPath();
+        ctx.arc(tp.x, tp.y, 1, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255, 200, 120, ${tp.life * 0.5})`;
+        ctx.fill();
+      }
+      if (s.phase === "done" && s.trailParticles.length === 0) {
+        fireworksShells.splice(i, 1);
+      }
+    }
+  }
+
   function renderWeatherFX(data, name) {
-    // Easter egg: Swallow Falls, MD
+    // July 4th fireworks for USA locations
     const nameLC = (name || "").toLowerCase();
+    const today = new Date();
+    const isJuly4th = today.getMonth() === 6 && today.getDate() === 4;
+    const isUSA = nameLC.includes("usa") || nameLC.includes("united states") ||
+      (currentLat != null && currentLon != null &&
+       currentLat >= 24.5 && currentLat <= 49.5 &&
+       currentLon >= -125 && currentLon <= -66.5);
+    fireworksMode = (isJuly4th && isUSA) || (fireworksPreview && isUSA);
+
+    // Cherry blossom season: Mar 29 – Apr 15 for VA/DC/MD, Mar 20 – Apr 20 for Japan
+    const mo = today.getMonth(), day = today.getDate();
+    const isDMVSeason = (mo === 2 && day >= 29) || (mo === 3 && day <= 15);
+    const isJapanSeason = (mo === 2 && day >= 20) || (mo === 3 && day <= 20);
+    const isDMVName = /\b(va|md|dc|virginia|maryland|district of columbia)\b/.test(nameLC) ||
+      nameLC.includes("washington") && (nameLC.includes("dc") || nameLC.includes("district"));
+    // Coordinate bounding box for VA/DC/MD region (lat 36.5–39.7, lon -79.5 to -75.0)
+    const isDMVCoords = currentLat != null && currentLon != null &&
+      currentLat >= 36.5 && currentLat <= 39.7 &&
+      currentLon >= -79.5 && currentLon <= -75.0;
+    const isDMV = isDMVName || isDMVCoords;
+    const isJapan = nameLC.includes("japan") ||
+      (currentLat != null && currentLon != null &&
+       currentLat >= 30 && currentLat <= 46 &&
+       currentLon >= 129 && currentLon <= 146);
+    cherryBlossomMode = (isDMVSeason && isDMV) || (isJapanSeason && isJapan);
+    if (cherryBlossomMode && blossomPetals.length === 0) spawnBlossomPetals();
+    if (!cherryBlossomMode) blossomPetals = [];
+
+    // Birthday confetti: May 21 & July 5 for VA locations
+    const isVAName = /\b(va|virginia)\b/.test(nameLC);
+    const isVACoords = currentLat != null && currentLon != null &&
+      currentLat >= 36.5 && currentLat <= 39.5 &&
+      currentLon >= -83.7 && currentLon <= -75.2;
+    const isVA = isVAName || isVACoords;
+    const isBirthday = (mo === 4 && day === 21) || (mo === 6 && day === 5);
+    birthdaySparkleMode = (isBirthday && isVA) || (birthdaySparklePreview && isVA);
+    if (birthdaySparkleMode && sparkleParticles.length === 0) spawnConfetti();
+    if (!birthdaySparkleMode) sparkleParticles = [];
+
+    // New Year's sparkles: Dec 31 & Jan 1 for all locations
+    const isNewYear = (mo === 11 && day === 31) || (mo === 0 && day === 1);
+    newYearSparkleMode = isNewYear;
+    if (newYearSparkleMode && nySparkleParticles.length === 0) spawnNYSparkles();
+    if (!newYearSparkleMode) nySparkleParticles = [];
+
+    if (fireworksMode) {
+      fxType = null;
+      fxIntensity = 0;
+      fireworksShells = [];
+      stopLightning();
+      stopRainSound();
+      pendingRainIntensity = null;
+      spawnParticles();
+      if (!fxAnimId) animateFX();
+      return;
+    }
+
+    // Easter egg: Swallow Falls, MD
     swallowFallsMode = nameLC.includes("swallow falls") || 
       (nameLC.includes("oakland") && nameLC.includes("maryland"));
 
@@ -812,7 +1165,14 @@
     99: ["Thunderstorm w/ heavy hail", "⛈️"],
   };
 
-  function weatherInfo(code) {
+  const WMO_NIGHT = {
+    0: ["Clear sky", "🌙"],
+    1: ["Mainly clear", "🌙"],
+    2: ["Partly cloudy", "☁️"],
+  };
+
+  function weatherInfo(code, isNight) {
+    if (isNight && WMO_NIGHT[code]) return WMO_NIGHT[code];
     return WMO[code] || ["Unknown", "❓"];
   }
 
@@ -845,14 +1205,18 @@
     const d = new Date(dateStr + "T00:00:00");
     return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
   }
-  function formatTime(isoStr) {
+  function formatTime(isoStr, timeZone) {
     if (!isoStr) return "—";
     const d = new Date(isoStr);
-    return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    const opts = { hour: "2-digit", minute: "2-digit" };
+    if (timeZone) opts.timeZone = timeZone;
+    return d.toLocaleTimeString(undefined, opts);
   }
-  function formatHour(isoStr) {
+  function formatHour(isoStr, timeZone) {
     const d = new Date(isoStr);
-    return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    const opts = { hour: "2-digit", minute: "2-digit" };
+    if (timeZone) opts.timeZone = timeZone;
+    return d.toLocaleTimeString(undefined, opts);
   }
 
   // ── API calls (Open-Meteo — no key needed) ──
@@ -932,12 +1296,26 @@
 
   // ── Render current weather ──
   let localTimeInterval = null;
-  let use24h = false;
+  let use24h = localStorage.getItem("weather_use24h") === "true";
 
   function renderCurrent(data, name) {
     const c = data.current;
     const d = data.daily;
-    const [desc, icon] = weatherInfo(c.weather_code);
+
+    // Determine if it's currently nighttime at this location
+    const tz = data.timezone;
+    let isNight = false;
+    try {
+      const now = new Date();
+      const localHour = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(now), 10);
+      const sr = new Date(d.sunrise[0]);
+      const ss = new Date(d.sunset[0]);
+      const srH = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "numeric", hour12: false }).formatToParts(sr).find(p => p.type === "hour").value, 10);
+      const ssH = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "numeric", hour12: false }).formatToParts(ss).find(p => p.type === "hour").value, 10);
+      isNight = localHour < srH || localHour >= ssH;
+    } catch (_) { /* fallback to daytime */ }
+
+    const [desc, icon] = weatherInfo(c.weather_code, isNight);
 
     // Store both abbreviated and full-state versions for US cities
     const abbrevName = cityNameWithAbbrev(name);
@@ -960,7 +1338,6 @@
     }
 
     // Local time + timezone abbreviation, updating every minute
-    const tz = data.timezone;
     function getTimeZoneAbbr(timeZone) {
       try {
         // Extract the real abbreviation from Intl formatter
@@ -998,6 +1375,7 @@
     $("#local-time").title = "Click to toggle 12h/24h";
     $("#local-time").onclick = () => {
       use24h = !use24h;
+      localStorage.setItem("weather_use24h", use24h);
       updateLocalTime();
     };
 
@@ -1099,7 +1477,9 @@
     const N = Math.floor((date - start) / 86400000) + 1;
 
     // Sun's mean anomaly
-    const M = (0.9856 * N) - 3.289;
+    const lngHour = lon / 15;
+    const t = N + ((rising ? 6 : 18) - lngHour) / 24;
+    const M = (0.9856 * t) - 3.289;
 
     // Sun's true longitude
     let L = M + (1.916 * Math.sin(M * rad)) + (0.020 * Math.sin(2 * M * rad)) + 282.634;
@@ -1128,8 +1508,6 @@
     H /= 15; // to hours
 
     // Local mean time
-    const lngHour = lon / 15;
-    const t = N + ((rising ? 6 : 18) - lngHour) / 24;
     const T = H + RA - (0.06571 * t) - 6.622;
 
     // UTC time
@@ -1141,22 +1519,80 @@
     return result;
   }
 
+  function formatTimeRaw(isoStr) {
+    // For API times that are already in local time (no offset), extract HH:MM directly
+    if (!isoStr) return "—";
+    const m = isoStr.match(/T(\d{2}):(\d{2})/);
+    if (m) {
+      let h = parseInt(m[1], 10);
+      const min = m[2];
+      const ampm = h >= 12 ? "PM" : "AM";
+      if (h === 0) h = 12;
+      else if (h > 12) h -= 12;
+      return `${h}:${min} ${ampm}`;
+    }
+    return isoStr;
+  }
+
   function renderSunTimes(data) {
     const d = data.daily;
     const sunrise = d.sunrise[0];
     const sunset = d.sunset[0];
     const lat = data.latitude;
-    const lon = data.longitude;
-    const today = new Date(d.time[0] + "T12:00:00");
+    const tz = data.timezone;
 
-    // Civil twilight: sun 6° below horizon (zenith = 96°)
-    const dawn = solarEvent(today, lat, lon, 96, true);
-    const dusk = solarEvent(today, lat, lon, 96, false);
+    // Compute civil twilight offset from sunrise/sunset using solar geometry
+    // The offset is the difference in hour angles between zenith 90.833° and 96°
+    const rad = Math.PI / 180;
+    const dayOfYear = Math.floor((new Date(d.time[0]) - new Date(new Date(d.time[0]).getFullYear(), 0, 1)) / 86400000) + 1;
+    // Solar declination (approximate)
+    const declination = -23.44 * Math.cos(rad * (360 / 365) * (dayOfYear + 10));
+    const latRad = lat * rad;
+    const decRad = declination * rad;
+    const cosDec = Math.cos(decRad);
+    const cosLat = Math.cos(latRad);
+    const sinDec = Math.sin(decRad);
+    const sinLat = Math.sin(latRad);
+    const denom = cosDec * cosLat;
 
-    $("#dawn").textContent = dawn ? formatTime(dawn.toISOString()) : "—";
-    $("#sunrise").textContent = formatTime(sunrise);
-    $("#sunset").textContent = formatTime(sunset);
-    $("#dusk").textContent = dusk ? formatTime(dusk.toISOString()) : "—";
+    function hourAngle(zenith) {
+      const cosH = (Math.cos(zenith * rad) - sinDec * sinLat) / denom;
+      if (cosH > 1 || cosH < -1) return null;
+      return Math.acos(cosH) / rad / 15; // hours
+    }
+
+    const haSunrise = hourAngle(90.833);
+    const haTwilight = hourAngle(96);
+    let twilightOffset = 0; // minutes
+    if (haSunrise !== null && haTwilight !== null) {
+      twilightOffset = Math.round((haTwilight - haSunrise) * 60);
+    }
+
+    // Apply offset to API sunrise/sunset strings to get dawn/dusk
+    function offsetTime(isoStr, offsetMin) {
+      const m = isoStr.match(/T(\d{2}):(\d{2})/);
+      if (!m) return null;
+      let totalMin = parseInt(m[1], 10) * 60 + parseInt(m[2], 10) + offsetMin;
+      if (totalMin < 0) totalMin += 1440;
+      if (totalMin >= 1440) totalMin -= 1440;
+      const h = Math.floor(totalMin / 60);
+      const min = totalMin % 60;
+      const ampm = h >= 12 ? "PM" : "AM";
+      const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+      return `${h12}:${String(min).padStart(2, "0")} ${ampm}`;
+    }
+
+    $("#dawn").textContent = offsetTime(sunrise, -twilightOffset) || "—";
+    $("#sunrise").textContent = formatTimeRaw(sunrise);
+    $("#sunset").textContent = formatTimeRaw(sunset);
+    $("#dusk").textContent = offsetTime(sunset, twilightOffset) || "—";
+
+    // Show timezone abbreviation
+    try {
+      const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "short" }).formatToParts(new Date());
+      const tzAbbr = parts.find(p => p.type === "timeZoneName");
+      $("#sun-tz").textContent = tzAbbr ? `(${tzAbbr.value})` : "";
+    } catch (_) { $("#sun-tz").textContent = ""; }
 
     show($("#sun-times"));
   }
@@ -1243,9 +1679,17 @@
     $("#moon-name").textContent = moon.name;
     $("#moon-illumination").textContent = `${moon.illumination}% illuminated · Day ${moon.age} of cycle`;
 
+    const tz = data.timezone;
     const rs = getMoonRiseSet(today, data.latitude, data.longitude);
-    $("#moonrise").textContent = rs.rise ? formatTime(rs.rise.toISOString()) : "—";
-    $("#moonset").textContent = rs.set ? formatTime(rs.set.toISOString()) : "—";
+    $("#moonrise").textContent = rs.rise ? formatTime(rs.rise.toISOString(), tz) : "—";
+    $("#moonset").textContent = rs.set ? formatTime(rs.set.toISOString(), tz) : "—";
+
+    // Show timezone abbreviation
+    try {
+      const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "short" }).formatToParts(new Date());
+      const tzAbbr = parts.find(p => p.type === "timeZoneName");
+      $("#moon-tz").textContent = tzAbbr ? `(${tzAbbr.value})` : "";
+    } catch (_) { $("#moon-tz").textContent = ""; }
 
     show($("#moon-phase"));
   }
@@ -1253,8 +1697,35 @@
   // ── Render hourly forecast ──
   function renderHourly(data) {
     const h = data.hourly;
+    const d = data.daily;
     const container = $("#hourly-scroll");
     container.innerHTML = "";
+
+    // Build sunrise/sunset hours for each day in the forecast
+    const tz = data.timezone;
+    let sunriseHours = [], sunsetHours = [];
+    try {
+      for (let di = 0; di < d.sunrise.length; di++) {
+        const sr = new Date(d.sunrise[di]);
+        const ss = new Date(d.sunset[di]);
+        sunriseHours.push(sr.getTime());
+        sunsetHours.push(ss.getTime());
+      }
+    } catch (_) { /* empty arrays = always daytime fallback */ }
+
+    function isHourNight(timeStr) {
+      if (sunriseHours.length === 0) return false;
+      const t = new Date(timeStr).getTime();
+      // Find the matching day
+      for (let di = 0; di < sunriseHours.length; di++) {
+        const dayStart = new Date(d.time[di] + "T00:00:00").getTime();
+        const dayEnd = dayStart + 86400000;
+        if (t >= dayStart && t < dayEnd) {
+          return t < sunriseHours[di] || t >= sunsetHours[di];
+        }
+      }
+      return false;
+    }
 
     const now = new Date();
     let startIdx = 0;
@@ -1264,11 +1735,11 @@
 
     const count = Math.min(48, h.time.length - startIdx);
     for (let i = startIdx; i < startIdx + count; i++) {
-      const [, icon] = weatherInfo(h.weather_code[i]);
+      const [, icon] = weatherInfo(h.weather_code[i], isHourNight(h.time[i]));
       const card = document.createElement("div");
       card.className = "hourly-card";
       card.innerHTML = `
-        <div class="hour">${formatHour(h.time[i])}</div>
+        <div class="hour">${formatHour(h.time[i], data.timezone)}</div>
         <div class="h-icon">${icon}</div>
         <div class="h-temp">${tempStr(h.temperature_2m[i])}</div>
         <div class="h-precip">${h.precipitation_probability[i]}% 💧</div>
@@ -1876,14 +2347,31 @@
     loadWeather(city[0], city[1], city[2]);
   });
 
-  // ── Unit toggle ──
-  document.querySelectorAll(".unit-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".unit-btn").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      unit = btn.dataset.unit;
-      if (weatherCache && currentLat !== null) {
-        renderAll(weatherCache, $("#location-name").textContent);
+  // ── Unit toggle (click temperature) ──
+  $("#current-temp").addEventListener("click", () => {
+    unit = unit === "fahrenheit" ? "celsius" : "fahrenheit";
+    if (weatherCache && currentLat !== null) {
+      renderAll(weatherCache, $("#location-name").textContent);
+    }
+  });
+
+  // ── Collapsible sections ──
+  document.querySelectorAll(".glass h3").forEach((h3) => {
+    h3.classList.add("section-header-toggle");
+    h3.addEventListener("click", () => {
+      const body = h3.closest("section").querySelector(".section-body");
+      if (!body) return;
+      h3.classList.toggle("collapsed");
+      if (body.classList.contains("collapsed")) {
+        body.style.maxHeight = body.scrollHeight + "px";
+        body.classList.remove("collapsed");
+        requestAnimationFrame(() => { body.style.maxHeight = body.scrollHeight + "px"; });
+      } else {
+        body.style.maxHeight = body.scrollHeight + "px";
+        requestAnimationFrame(() => {
+          body.style.maxHeight = "0px";
+          body.classList.add("collapsed");
+        });
       }
     });
   });

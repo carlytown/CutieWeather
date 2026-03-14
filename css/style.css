@@ -182,7 +182,8 @@ header h1 {
 }
 .current-temp-block { display: flex; align-items: center; justify-content: center; gap: 12px; }
 .weather-icon-lg { font-size: 3.5rem; }
-.big-temp { font-size: 4rem; font-weight: 700; }
+.big-temp { font-size: 4rem; font-weight: 700; cursor: pointer; }
+.big-temp:hover { opacity: 0.8; }
 #weather-desc { font-size: 1.1rem; color: var(--text-dim); margin-top: 4px; text-transform: capitalize; }
 #feels-like { font-size: 0.85rem; color: var(--text-dim); margin-top: 2px; }
 
@@ -227,7 +228,7 @@ header h1 {
   text-align: center;
 }
 .sun-label { display: block; font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-.sun-value { font-size: 1.1rem; font-weight: 600; color: var(--accent2); }
+.sun-value { font-size: 1.1rem; font-weight: 600; color: #f8cdd9; }
 
 /* ── Moon Phase ── */
 #moon-phase {
@@ -244,6 +245,27 @@ header h1 {
 .moon-name { font-size: 1.2rem; font-weight: 600; }
 .moon-detail { font-size: 0.9rem; color: var(--text-dim); }
 .moon-times { display: flex; gap: 16px; margin-left: 32px; }
+
+/* ── Collapsible Sections ── */
+.section-header-toggle {
+  cursor: pointer;
+  user-select: none;
+  transition: margin-bottom 0.3s ease;
+}
+.section-header-toggle.collapsed {
+  margin-bottom: 0 !important;
+}
+.section-body {
+  overflow: hidden;
+  transition: max-height 0.35s ease, opacity 0.3s ease;
+  opacity: 1;
+}
+.section-body.collapsed {
+  max-height: 0 !important;
+  opacity: 0;
+  margin: 0;
+  padding: 0;
+}
 
 /* ── Hourly ── */
 #hourly-section {
@@ -348,7 +370,7 @@ header h1 {
 #zodiac-section h3 { margin-bottom: 16px; font-size: 1.1rem; }
 .zodiac-year { font-size: 0.95rem; margin-bottom: 16px; color: var(--text-dim); }
 .zodiac-year strong { color: var(--text); font-weight: 600; }
-.zodiac-lucky { display: flex; flex-wrap: wrap; gap: 12px; }
+.zodiac-lucky { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
 .zodiac-card {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   padding: 12px 16px; border-radius: 10px;
@@ -379,4 +401,17 @@ canvas { width: 100% !important; border-radius: 8px; }
   .daily-row { grid-template-columns: 70px 30px 1fr 55px 55px; font-size: 0.8rem; }
   .current-details { grid-template-columns: repeat(2, 1fr); }
   #city-input { width: 160px; }
+
+  .moon-display {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .moon-times {
+    margin-left: 0;
+    width: 100%;
+    justify-content: space-evenly;
+  }
+
+  #zodiac-section { text-align: center; }
+  .zodiac-lucky { justify-content: center; }
 }

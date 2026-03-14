@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Weather App</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="weather-fx"></canvas>
+  <div id="app">
+    <!-- Search Bar -->
+    <header>
+      <h1>&#9788; Weather</h1>
+      <div id="search-bar">
+        <input type="text" id="city-input" placeholder="Search city..." autocomplete="off">
+        <button id="search-btn">Search</button>
+        <button id="locate-btn" title="Use my location">&#9737;</button>
+      </div>
+      <div id="suggestions"></div>
+      <div id="unit-toggle">
+        <button class="unit-btn" data-unit="celsius">°C</button>
+        <button class="unit-btn active" data-unit="fahrenheit">°F</button>
+        <button id="random-btn" title="Random city">🎲</button>
+      </div>
+    </header>
+
+    <!-- Loading / Error -->
+    <div id="loading" class="hidden"><div class="spinner"></div></div>
+    <div id="error" class="hidden"></div>
+
+    <!-- Current Weather -->
+    <section id="current-weather" class="hidden glass">
+      <div class="location-info">
+        <h2><span id="location-name"></span> <span id="local-time" class="local-time"></span></h2>
+        <p id="current-date"></p>
+      </div>
+      <div class="current-main">
+        <div class="current-temp-block">
+          <span id="weather-icon" class="weather-icon-lg"></span>
+          <span id="current-temp" class="big-temp"></span>
+        </div>
+        <p id="weather-desc"></p>
+        <p id="feels-like"></p>
+      </div>
+      <div class="current-details">
+        <div class="detail-card">
+          <span class="detail-label">Humidity</span>
+          <span id="humidity" class="detail-value"></span>
+        </div>
+        <div class="detail-card">
+          <span class="detail-label">Wind</span>
+          <span id="wind" class="detail-value"></span>
+        </div>
+        <div class="detail-card">
+          <span class="detail-label">Wind Direction</span>
+          <span id="wind-dir" class="detail-value"></span>
+        </div>
+        <div class="detail-card">
+          <span class="detail-label">Precipitation</span>
+          <span id="precip" class="detail-value"></span>
+        </div>
+        <div class="detail-card">
+          <span class="detail-label">Pressure</span>
+          <span id="pressure" class="detail-value"></span>
+        </div>
+        <div class="detail-card">
+          <span class="detail-label">Current UV</span>
+          <span id="uv-current" class="detail-value"></span>
+        </div>
+        <div class="detail-card">
+          <span class="detail-label">High UV</span>
+          <span id="uv-index" class="detail-value"></span>
+        </div>
+        <div class="detail-card">
+          <span class="detail-label">Cloud Cover</span>
+          <span id="cloud-cover" class="detail-value"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sun Times -->
+    <section id="sun-times" class="hidden glass">
+      <h3>Sun &amp; Twilight</h3>
+      <div class="sun-grid">
+        <div class="sun-card">
+          <span class="sun-label">Dawn</span>
+          <span id="dawn" class="sun-value"></span>
+        </div>
+        <div class="sun-card">
+          <span class="sun-label">Sunrise</span>
+          <span id="sunrise" class="sun-value"></span>
+        </div>
+        <div class="sun-card">
+          <span class="sun-label">Sunset</span>
+          <span id="sunset" class="sun-value"></span>
+        </div>
+        <div class="sun-card">
+          <span class="sun-label">Dusk</span>
+          <span id="dusk" class="sun-value"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Moon Phase -->
+    <section id="moon-phase" class="hidden glass">
+      <h3>Moon Phase</h3>
+      <div class="moon-display">
+        <span id="moon-icon" class="moon-icon-lg"></span>
+        <div class="moon-info">
+          <span id="moon-name" class="moon-name"></span>
+          <span id="moon-illumination" class="moon-detail"></span>
+        </div>
+        <div class="moon-times">
+          <div class="sun-card">
+            <span class="sun-label">Moonrise</span>
+            <span id="moonrise" class="sun-value"></span>
+          </div>
+          <div class="sun-card">
+            <span class="sun-label">Moonset</span>
+            <span id="moonset" class="sun-value"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Hourly Forecast -->
+    <section id="hourly-section" class="hidden glass">
+      <h3>Hourly Forecast (48h)</h3>
+      <div id="hourly-scroll" class="hourly-scroll"></div>
+    </section>
+
+    <!-- Range Toggle -->
+    <section id="forecast-section" class="hidden glass">
+      <div class="forecast-header">
+        <h3>Daily Forecast</h3>
+        <div id="range-toggle">
+          <button class="range-btn active" data-days="7">7 Days</button>
+          <button class="range-btn" data-days="14">14 Days</button>
+        </div>
+      </div>
+      <div id="daily-forecast"></div>
+    </section>
+
+    <!-- What to Wear -->
+    <section id="attire-section" class="hidden glass">
+      <h3>What to Wear Today</h3>
+      <div id="attire-content" class="attire-content"></div>
+    </section>
+
+    <!-- Chinese Zodiac -->
+    <section id="zodiac-section" class="hidden glass">
+      <h3>Chinese Zodiac</h3>
+      <div id="zodiac-year" class="zodiac-year"></div>
+      <div id="zodiac-lucky" class="zodiac-lucky"></div>
+    </section>
+
+  </div>
+
+  <script src="js/weather.js"></script>
+</body>
+</html>

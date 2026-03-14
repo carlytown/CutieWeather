@@ -1,0 +1,382 @@
+/* ── Reset & Base ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0f1923;
+  --surface: #1a2735;
+  --surface2: #233345;
+  --accent: #ffffff;
+  --accent2: #f0c8a0;
+  --text: #e0e6ed;
+  --text-dim: #8899aa;
+  --radius: 12px;
+  --shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+
+.glass {
+  background: rgba(220, 160, 180, 0.2) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 200, 220, 0.15);
+  position: relative;
+  z-index: 1;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+#app {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 20px 16px 60px;
+  position: relative;
+}
+
+#weather-fx {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.hidden { display: none !important; }
+
+/* ── Header ── */
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  position: relative;
+}
+
+header h1 {
+  font-size: 1.5rem;
+  color: var(--accent);
+  margin-right: auto;
+}
+
+#search-bar {
+  display: flex;
+  gap: 6px;
+}
+
+#city-input {
+  padding: 10px 16px;
+  border: 1px solid rgba(255, 200, 220, 0.15);
+  border-radius: var(--radius);
+  background: rgba(220, 160, 180, 0.2);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: var(--text);
+  font-size: 0.95rem;
+  width: 240px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+#city-input:focus { border-color: var(--accent); }
+
+#search-btn, #locate-btn {
+  padding: 10px 16px;
+  border: 1px solid rgba(255, 200, 220, 0.15);
+  border-radius: var(--radius);
+  background: rgba(220, 160, 180, 0.2);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.95rem;
+  transition: opacity 0.2s;
+}
+#search-btn:hover, #locate-btn:hover { opacity: 0.85; }
+#locate-btn { font-size: 1.2rem; padding: 8px 12px; background: rgba(220, 160, 180, 0.45); }
+
+#suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  max-height: 240px;
+  overflow-y: auto;
+}
+#suggestions .suggestion-item {
+  padding: 10px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--surface2);
+  font-size: 0.9rem;
+}
+#suggestions .suggestion-item:hover { background: var(--surface2); }
+
+#unit-toggle { display: flex; gap: 4px; }
+.unit-btn {
+  padding: 8px 14px;
+  border: 1px solid var(--surface2);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+}
+.unit-btn.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+
+#random-btn {
+  padding: 8px 14px;
+  border: 1px solid var(--surface2);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 1rem;
+  transition: all 0.2s;
+}
+#random-btn:hover { background: var(--surface2); }
+
+/* ── Loading ── */
+.spinner {
+  width: 40px; height: 40px;
+  border: 4px solid var(--surface2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin: 60px auto;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+#error {
+  text-align: center;
+  padding: 20px;
+  color: #ef5350;
+  font-size: 1rem;
+}
+
+/* ── Current Weather ── */
+#current-weather {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 28px;
+  box-shadow: var(--shadow);
+  margin-bottom: 20px;
+}
+.location-info { margin-bottom: 16px; }
+.location-info h2 { font-size: 1.6rem; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.local-time { font-size: 0.95rem; font-weight: 400; color: var(--accent); }
+.location-info p { color: var(--text-dim); font-size: 0.9rem; margin-top: 2px; }
+
+.current-main {
+  text-align: center;
+  margin-bottom: 24px;
+}
+.current-temp-block { display: flex; align-items: center; justify-content: center; gap: 12px; }
+.weather-icon-lg { font-size: 3.5rem; }
+.big-temp { font-size: 4rem; font-weight: 700; }
+#weather-desc { font-size: 1.1rem; color: var(--text-dim); margin-top: 4px; text-transform: capitalize; }
+#feels-like { font-size: 0.85rem; color: var(--text-dim); margin-top: 2px; }
+
+.current-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+}
+.detail-card {
+  background: rgba(220, 160, 180, 0.15);
+  border-radius: 10px;
+  padding: 14px;
+  text-align: center;
+  cursor: grab;
+  transition: transform 0.15s, opacity 0.15s, box-shadow 0.15s;
+  user-select: none;
+}
+.detail-card:active { cursor: grabbing; }
+.detail-card.dragging { opacity: 0.4; transform: scale(0.95); }
+.detail-card.drag-over { box-shadow: 0 0 0 2px var(--accent2); transform: scale(1.03); }
+.detail-label { display: block; font-size: 0.75rem; color: var(--text-dim); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+.detail-value { font-size: 1.15rem; font-weight: 600; }
+
+/* ── Sun Times ── */
+#sun-times {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: var(--shadow);
+  margin-bottom: 20px;
+}
+#sun-times h3 { margin-bottom: 16px; font-size: 1.1rem; }
+.sun-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.sun-card {
+  background: rgba(220, 160, 180, 0.15);
+  border-radius: 10px;
+  padding: 16px;
+  text-align: center;
+}
+.sun-label { display: block; font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.sun-value { font-size: 1.1rem; font-weight: 600; color: var(--accent2); }
+
+/* ── Moon Phase ── */
+#moon-phase {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: var(--shadow);
+  margin-bottom: 20px;
+}
+#moon-phase h3 { margin-bottom: 16px; font-size: 1.1rem; }
+.moon-display { display: flex; align-items: center; gap: 20px; }
+.moon-icon-lg { font-size: 3.5rem; }
+.moon-info { display: flex; flex-direction: column; gap: 4px; }
+.moon-name { font-size: 1.2rem; font-weight: 600; }
+.moon-detail { font-size: 0.9rem; color: var(--text-dim); }
+.moon-times { display: flex; gap: 16px; margin-left: 32px; }
+
+/* ── Hourly ── */
+#hourly-section {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: var(--shadow);
+  margin-bottom: 20px;
+}
+#hourly-section h3 { margin-bottom: 14px; font-size: 1.1rem; }
+.hourly-scroll {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 10px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface2) transparent;
+}
+.hourly-card {
+  flex: 0 0 80px;
+  background: rgba(220, 160, 180, 0.15);
+  border-radius: 10px;
+  padding: 12px 8px;
+  text-align: center;
+  font-size: 0.8rem;
+}
+.hourly-card .hour { color: var(--text-dim); margin-bottom: 6px; }
+.hourly-card .h-icon { font-size: 1.5rem; margin-bottom: 4px; }
+.hourly-card .h-temp { font-weight: 600; font-size: 1rem; }
+.hourly-card .h-precip { color: var(--accent); font-size: 0.75rem; margin-top: 4px; }
+
+/* ── Daily Forecast ── */
+#forecast-section {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: var(--shadow);
+  margin-bottom: 20px;
+}
+.forecast-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.forecast-header h3 { font-size: 1.1rem; }
+
+#range-toggle { display: flex; gap: 4px; }
+.range-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--surface2);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.2s;
+}
+.range-btn.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+
+.daily-row {
+  display: grid;
+  grid-template-columns: 100px 40px 1fr 80px 80px;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--surface2);
+  font-size: 0.9rem;
+}
+.daily-row:last-child { border-bottom: none; }
+.daily-day { font-weight: 600; }
+.daily-icon { font-size: 1.4rem; text-align: center; }
+.daily-bar-wrap { height: 6px; background: rgba(255,255,255,0.3); border-radius: 3px; position: relative; overflow: hidden; }
+.daily-bar { position: absolute; height: 100%; border-radius: 3px; }
+.daily-hi { text-align: right; font-weight: 600; }
+.daily-lo { text-align: right; color: var(--text-dim); }
+
+/* ── UV Index ── */
+/* ── Attire / What to Wear ── */
+#attire-section {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: var(--shadow);
+  margin-bottom: 20px;
+}
+#attire-section h3 { margin-bottom: 16px; font-size: 1.1rem; }
+.attire-content { display: flex; flex-direction: column; gap: 12px; }
+.attire-item { display: flex; align-items: center; gap: 12px; font-size: 0.95rem; }
+.attire-icon { font-size: 1.6rem; flex-shrink: 0; width: 36px; text-align: center; }
+.attire-text { line-height: 1.4; }
+.attire-text strong { font-weight: 600; }
+
+/* ── Chinese Zodiac ── */
+#zodiac-section {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: var(--shadow);
+  margin-bottom: 20px;
+}
+#zodiac-section h3 { margin-bottom: 16px; font-size: 1.1rem; }
+.zodiac-year { font-size: 0.95rem; margin-bottom: 16px; color: var(--text-dim); }
+.zodiac-year strong { color: var(--text); font-weight: 600; }
+.zodiac-lucky { display: flex; flex-wrap: wrap; gap: 12px; }
+.zodiac-card {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 12px 16px; border-radius: 10px;
+  background: rgba(220, 160, 180, 0.15);
+  min-width: 80px;
+}
+.zodiac-card.lucky { background: rgba(255, 215, 100, 0.2); border: 1px solid rgba(255, 215, 100, 0.3); }
+.zodiac-card.day-sign { background: rgba(180, 160, 255, 0.2); border: 1px solid rgba(180, 160, 255, 0.3); }
+.zodiac-card.clash { background: rgba(255, 100, 100, 0.15); border: 1px solid rgba(255, 100, 100, 0.25); }
+.zodiac-emoji { font-size: 1.8rem; }
+.zodiac-name { font-size: 0.8rem; font-weight: 600; }
+.zodiac-luck { font-size: 0.7rem; color: var(--text-dim); }
+
+/* ── Charts ── */
+#precip-section, #temp-chart-section {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: var(--shadow);
+  margin-bottom: 20px;
+}
+#precip-section h3, #temp-chart-section h3 { margin-bottom: 14px; font-size: 1.1rem; }
+canvas { width: 100% !important; border-radius: 8px; }
+
+/* ── Responsive ── */
+@media (max-width: 600px) {
+  .sun-grid { grid-template-columns: repeat(2, 1fr); }
+  .daily-row { grid-template-columns: 70px 30px 1fr 55px 55px; font-size: 0.8rem; }
+  .current-details { grid-template-columns: repeat(2, 1fr); }
+  #city-input { width: 160px; }
+}

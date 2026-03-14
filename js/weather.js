@@ -1,0 +1,1920 @@
+(() => {
+  "use strict";
+
+  // ── State ──
+  let unit = "fahrenheit"; // "celsius" | "fahrenheit"
+  let forecastDays = 7;
+  let currentLat = null;
+  let currentLon = null;
+  let weatherCache = null;
+  let showFullState = false; // toggle for US state name display
+
+  // ── US state abbreviation map ──
+  const US_STATES = {
+    "Alabama":"AL","Alaska":"AK","Arizona":"AZ","Arkansas":"AR","California":"CA",
+    "Colorado":"CO","Connecticut":"CT","Delaware":"DE","Florida":"FL","Georgia":"GA",
+    "Hawaii":"HI","Idaho":"ID","Illinois":"IL","Indiana":"IN","Iowa":"IA",
+    "Kansas":"KS","Kentucky":"KY","Louisiana":"LA","Maine":"ME","Maryland":"MD",
+    "Massachusetts":"MA","Michigan":"MI","Minnesota":"MN","Mississippi":"MS","Missouri":"MO",
+    "Montana":"MT","Nebraska":"NE","Nevada":"NV","New Hampshire":"NH","New Jersey":"NJ",
+    "New Mexico":"NM","New York":"NY","North Carolina":"NC","North Dakota":"ND","Ohio":"OH",
+    "Oklahoma":"OK","Oregon":"OR","Pennsylvania":"PA","Rhode Island":"RI","South Carolina":"SC",
+    "South Dakota":"SD","Tennessee":"TN","Texas":"TX","Utah":"UT","Vermont":"VT",
+    "Virginia":"VA","Washington":"WA","West Virginia":"WV","Wisconsin":"WI","Wyoming":"WY",
+    "District of Columbia":"DC",
+  };
+  const US_ABBREV_TO_FULL = Object.fromEntries(Object.entries(US_STATES).map(([k,v]) => [v,k]));
+
+  // Convert a city name string to use state abbreviation or full name
+  function cityNameWithAbbrev(name) {
+    // Try "City, FullState, USA" → "City, AB, USA"
+    for (const [full, abbr] of Object.entries(US_STATES)) {
+      const re = new RegExp(`,\\s*${full}\\s*,\\s*USA?`, "i");
+      if (re.test(name)) return name.replace(re, `, ${abbr}, USA`);
+    }
+    return name;
+  }
+  function cityNameWithFull(name) {
+    // Try "City, AB, USA" → "City, FullState, USA"
+    for (const [abbr, full] of Object.entries(US_ABBREV_TO_FULL)) {
+      const re = new RegExp(`,\\s*${abbr}\\s*,\\s*USA?`, "i");
+      if (re.test(name)) return name.replace(re, `, ${full}, USA`);
+    }
+    return name;
+  }
+
+  // ── DOM refs ──
+  const $ = (s) => document.querySelector(s);
+  const cityInput = $("#city-input");
+  const searchBtn = $("#search-btn");
+  const locateBtn = $("#locate-btn");
+  const suggestionsEl = $("#suggestions");
+  const loadingEl = $("#loading");
+  const errorEl = $("#error");
+
+  // ── Temperature → pastel color (0°F = deep indigo, 100°F = soft rose) ──
+  function tempFToColor(f) {
+    // Widen range to -10..110 for more variation at the extremes
+    const t = Math.max(-10, Math.min(110, f));
+    // Pastel color stops with more granularity
+    const stops = [
+      [-10, 60,  50, 120],   // -10°F – deep indigo
+      [0,   80,  80, 160],   //  0°F  – muted indigo
+      [8,  100, 110, 190],   //  8°F  – steel blue
+      [16, 120, 140, 210],   // 16°F  – periwinkle
+      [24, 130, 170, 220],   // 24°F  – soft blue
+      [32, 140, 195, 225],   // 32°F  – powder blue (freezing)
+      [38, 140, 210, 210],   // 38°F  – pale teal
+      [44, 145, 215, 195],   // 44°F  – seafoam
+      [50, 150, 210, 170],   // 50°F  – sage
+      [56, 160, 205, 145],   // 56°F  – soft green
+      [62, 175, 200, 125],   // 62°F  – spring green
+      [68, 195, 205, 115],   // 68°F  – chartreuse
+      [72, 215, 205, 110],   // 72°F  – warm lime
+      [76, 230, 200, 115],   // 76°F  – pastel yellow
+      [80, 235, 190, 120],   // 80°F  – golden
+      [84, 235, 175, 125],   // 84°F  – light apricot
+      [88, 230, 160, 130],   // 88°F  – peach
+      [92, 225, 145, 130],   // 92°F  – salmon
+      [96, 220, 130, 130],   // 96°F  – soft coral
+      [100, 210, 115, 125],  // 100°F – dusty rose
+      [110, 190,  90, 110],  // 110°F – deep rose
+    ];
+    // Find the two surrounding stops
+    let lo = stops[0], hi = stops[stops.length - 1];
+    for (let i = 0; i < stops.length - 1; i++) {
+      if (t >= stops[i][0] && t <= stops[i + 1][0]) {
+        lo = stops[i];
+        hi = stops[i + 1];
+        break;
+      }
+    }
+    const pct = (hi[0] === lo[0]) ? 0 : (t - lo[0]) / (hi[0] - lo[0]);
+    const r = Math.round(lo[1] + (hi[1] - lo[1]) * pct);
+    const g = Math.round(lo[2] + (hi[2] - lo[2]) * pct);
+    const b = Math.round(lo[3] + (hi[3] - lo[3]) * pct);
+    return `rgb(${r},${g},${b})`;
+  }
+
+  // ── Render background gradient from hourly temperatures ──
+  function renderBackgroundGradient(data) {
+    const h = data.hourly;
+    const firstDay = data.daily.time[0];
+
+    // Build a 24-slot array (hour 0–23) for today
+    const hourTemps = new Array(24).fill(null);
+    for (let i = 0; i < h.time.length; i++) {
+      if (h.time[i].startsWith(firstDay)) {
+        const hr = parseInt(h.time[i].slice(11, 13), 10);
+        if (hr >= 0 && hr < 24) hourTemps[hr] = h.temperature_2m[i];
+      }
+    }
+
+    // Build gradient stops for every hour that has data
+    const colorStops = [];
+    for (let hr = 0; hr < 24; hr++) {
+      if (hourTemps[hr] === null) continue;
+      const f = (hourTemps[hr] * 9) / 5 + 32;
+      const color = tempFToColor(f);
+      const pct = (hr / 23) * 100; // 0=midnight at top, 23=11PM at bottom
+      colorStops.push(`${color} ${pct.toFixed(1)}%`);
+    }
+    if (colorStops.length === 0) return;
+
+    document.body.style.background = `linear-gradient(to bottom, ${colorStops.join(", ")})`;
+    document.body.style.backgroundAttachment = "fixed";
+  }
+
+  // ── Weather particle effects (rain / snow / wind) ──
+  const fxCanvas = $("#weather-fx");
+  const fxCtx = fxCanvas.getContext("2d");
+  let fxParticles = [];
+  let fxType = null; // "rain" | "snow" | "wind" | null
+  let fxIntensity = 0; // 0-1
+  let fxAnimId = null;
+  let lightningActive = false;
+  let lightningFlash = 0; // current flash brightness 0-1
+  let lightningTimer = null;
+  let lightningBolt = null; // current bolt path to draw
+  let swallowFallsMode = false; // Easter egg!
+
+  // Snow accumulation: array of heights per pixel column
+  let snowAccum = [];
+  const SNOW_MAX_HEIGHT = 120; // max accumulation in pixels
+  const SNOW_ACCUM_RATE = 1.8; // how much each flake adds
+
+  function resetSnowAccum() {
+    snowAccum = new Array(Math.max(1, fxCanvas.width)).fill(0);
+  }
+  // Clear accumulation on scroll
+  window.addEventListener("scroll", () => {
+    if (fxType === "snow") {
+      for (let i = 0; i < snowAccum.length; i++) {
+        snowAccum[i] = Math.max(0, snowAccum[i] - 2);
+      }
+    }
+  });
+
+  function resizeFxCanvas() {
+    fxCanvas.width = window.innerWidth;
+    fxCanvas.height = window.innerHeight;
+    resetSnowAccum();
+    spawnParticles();
+  }
+  resizeFxCanvas();
+  window.addEventListener("resize", resizeFxCanvas);
+
+  function classifyWeatherFX(code, windSpeed) {
+    // Snow codes
+    if ([71, 73, 75, 77, 85, 86].includes(code)) {
+      const intensityMap = { 71: 0.3, 73: 0.6, 75: 1, 77: 0.4, 85: 0.4, 86: 0.8 };
+      return { type: "snow", intensity: intensityMap[code] || 0.5, lightning: false };
+    }
+    // Rain / drizzle / shower codes
+    if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99].includes(code)) {
+      const intensityMap = {
+        51: 0.2, 53: 0.4, 55: 0.6, 56: 0.3, 57: 0.5,
+        61: 0.3, 63: 0.6, 65: 1, 66: 0.4, 67: 0.8,
+        80: 0.3, 81: 0.6, 82: 1, 95: 0.7, 96: 0.8, 99: 1,
+      };
+      return { type: "rain", intensity: intensityMap[code] || 0.5, lightning: [95, 96, 99].includes(code) };
+    }
+    // Wind: if wind speed > 30 km/h and no precip, show wind streaks
+    if (windSpeed > 30) {
+      return { type: "wind", intensity: Math.min(1, (windSpeed - 30) / 40), lightning: false };
+    }
+    return { type: null, intensity: 0, lightning: false };
+  }
+
+  function spawnParticles() {
+    fxParticles = [];
+    if (swallowFallsMode) {
+      // Cloudy with a Chance of Meatballs!
+      const W = fxCanvas.width;
+      const H = fxCanvas.height;
+      const foods = ["🍝", "🧆", "🍖", "🥩", "🧀", "🍕", "🌭", "🥐", "🍞", "🥧", "🍰", "🧁", "🍗", "🥪"];
+      const count = 30;
+      for (let i = 0; i < count; i++) {
+        fxParticles.push({
+          x: Math.random() * W,
+          y: Math.random() * H,
+          emoji: foods[Math.floor(Math.random() * foods.length)],
+          size: 16 + Math.random() * 24,
+          speed: 1 + Math.random() * 2.5,
+          drift: (Math.random() - 0.5) * 0.8,
+          wobble: Math.random() * Math.PI * 2,
+          wobbleSpeed: 0.01 + Math.random() * 0.02,
+          rotation: Math.random() * Math.PI * 2,
+          rotSpeed: (Math.random() - 0.5) * 0.03,
+        });
+      }
+      return;
+    }
+    if (!fxType) return;
+    const W = fxCanvas.width;
+    const H = fxCanvas.height;
+    if (fxType === "rain") {
+      const count = Math.floor(40 * fxIntensity) + 15;
+      for (let i = 0; i < count; i++) {
+        fxParticles.push({
+          x: Math.random() * W,
+          y: Math.random() * H,
+          len: 14 + Math.random() * 16,
+          speed: 10 + Math.random() * 12 + fxIntensity * 8,
+          drift: 3 + Math.random() * 3,
+          opacity: 0.3 + Math.random() * 0.25,
+          width: 2.5 + Math.random() * 2,
+        });
+      }
+    } else if (fxType === "snow") {
+      const count = Math.floor(50 * fxIntensity) + 25;
+      for (let i = 0; i < count; i++) {
+        fxParticles.push({
+          x: Math.random() * W,
+          y: Math.random() * H,
+          r: 2.5 + Math.random() * 3.5,
+          arms: 6,
+          rotation: Math.random() * Math.PI * 2,
+          rotSpeed: (Math.random() - 0.5) * 0.02,
+          speed: 1.2 + Math.random() * 2.5 + fxIntensity * 1.5,
+          drift: Math.random() * 1.2 - 0.6,
+          wobble: Math.random() * Math.PI * 2,
+          wobbleSpeed: 0.01 + Math.random() * 0.02,
+          opacity: 0.5 + Math.random() * 0.4,
+        });
+      }
+    } else if (fxType === "wind") {
+      const count = Math.floor(40 * fxIntensity) + 10;
+      for (let i = 0; i < count; i++) {
+        fxParticles.push({
+          x: Math.random() * W,
+          y: Math.random() * H,
+          len: 30 + Math.random() * 60,
+          speed: 4 + Math.random() * 6 + fxIntensity * 4,
+          opacity: 0.06 + Math.random() * 0.1,
+          curve: Math.random() * 8 - 4,
+        });
+      }
+    }
+  }
+
+  function animateFX() {
+    const W = fxCanvas.width;
+    const H = fxCanvas.height;
+    fxCtx.clearRect(0, 0, W, H);
+
+    if (!fxType || fxParticles.length === 0) {
+      if (!swallowFallsMode) {
+        fxAnimId = requestAnimationFrame(animateFX);
+        return;
+      }
+    }
+
+    // Easter egg: Swallow Falls food rain
+    if (swallowFallsMode && fxParticles.length > 0) {
+      for (const p of fxParticles) {
+        p.wobble += p.wobbleSpeed;
+        p.rotation += p.rotSpeed;
+        fxCtx.save();
+        fxCtx.translate(p.x, p.y);
+        fxCtx.rotate(p.rotation);
+        fxCtx.font = `${p.size}px serif`;
+        fxCtx.textAlign = "center";
+        fxCtx.textBaseline = "middle";
+        fxCtx.fillText(p.emoji, 0, 0);
+        fxCtx.restore();
+        p.x += p.drift + Math.sin(p.wobble) * 0.3;
+        p.y += p.speed;
+        if (p.y > H + p.size) { p.y = -p.size; p.x = Math.random() * W; }
+        if (p.x > W) p.x = 0;
+        if (p.x < 0) p.x = W;
+      }
+      fxAnimId = requestAnimationFrame(animateFX);
+      return;
+    }
+
+    if (fxType === "rain") {
+      for (const p of fxParticles) {
+        fxCtx.beginPath();
+        fxCtx.moveTo(p.x, p.y);
+        fxCtx.lineTo(p.x + p.drift, p.y + p.len);
+        fxCtx.strokeStyle = `rgba(140, 180, 255, ${p.opacity})`;
+        fxCtx.lineWidth = p.width;
+        fxCtx.lineCap = "round";
+        fxCtx.stroke();
+        p.x += p.drift;
+        p.y += p.speed;
+        if (p.y > H) { p.y = -p.len; p.x = Math.random() * W; }
+        if (p.x > W) p.x = 0;
+      }
+    } else if (fxType === "snow") {
+      // Draw accumulated snow pile
+      if (snowAccum.length > 0) {
+        // Smooth the accumulation for a natural look
+        const smoothed = new Array(snowAccum.length);
+        const smoothRadius = 8;
+        for (let x = 0; x < snowAccum.length; x++) {
+          let sum = 0, count = 0;
+          for (let dx = -smoothRadius; dx <= smoothRadius; dx++) {
+            const nx = x + dx;
+            if (nx >= 0 && nx < snowAccum.length) {
+              sum += snowAccum[nx];
+              count++;
+            }
+          }
+          smoothed[x] = sum / count;
+        }
+        fxCtx.beginPath();
+        fxCtx.moveTo(0, H);
+        for (let x = 0; x < smoothed.length; x += 2) {
+          fxCtx.lineTo(x, H - smoothed[x]);
+        }
+        fxCtx.lineTo(smoothed.length, H);
+        fxCtx.closePath();
+        fxCtx.fillStyle = "rgba(240, 245, 255, 0.8)";
+        fxCtx.fill();
+        // Subtle top edge highlight
+        fxCtx.beginPath();
+        fxCtx.moveTo(0, H - smoothed[0]);
+        for (let x = 2; x < smoothed.length; x += 2) {
+          fxCtx.lineTo(x, H - smoothed[x]);
+        }
+        fxCtx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+        fxCtx.lineWidth = 1.5;
+        fxCtx.stroke();
+      }
+
+      // Draw and animate falling snowflakes
+      for (const p of fxParticles) {
+        p.wobble += p.wobbleSpeed;
+        p.rotation += p.rotSpeed;
+
+        // Draw snowflake star shape
+        fxCtx.save();
+        fxCtx.translate(p.x, p.y);
+        fxCtx.rotate(p.rotation);
+        fxCtx.strokeStyle = `rgba(255, 255, 255, ${p.opacity})`;
+        fxCtx.lineWidth = 1;
+        fxCtx.lineCap = "round";
+        for (let a = 0; a < p.arms; a++) {
+          const angle = (Math.PI * 2 / p.arms) * a;
+          const cos = Math.cos(angle);
+          const sin = Math.sin(angle);
+          // Main arm
+          fxCtx.beginPath();
+          fxCtx.moveTo(0, 0);
+          fxCtx.lineTo(cos * p.r, sin * p.r);
+          fxCtx.stroke();
+          // Small branches at 60% of arm length
+          const bx = cos * p.r * 0.55;
+          const by = sin * p.r * 0.55;
+          const branchLen = p.r * 0.3;
+          const bAngle1 = angle + 0.5;
+          const bAngle2 = angle - 0.5;
+          fxCtx.beginPath();
+          fxCtx.moveTo(bx, by);
+          fxCtx.lineTo(bx + Math.cos(bAngle1) * branchLen, by + Math.sin(bAngle1) * branchLen);
+          fxCtx.stroke();
+          fxCtx.beginPath();
+          fxCtx.moveTo(bx, by);
+          fxCtx.lineTo(bx + Math.cos(bAngle2) * branchLen, by + Math.sin(bAngle2) * branchLen);
+          fxCtx.stroke();
+        }
+        fxCtx.restore();
+
+        p.x += p.drift + Math.sin(p.wobble) * 0.5;
+        p.y += p.speed;
+
+        // Check if flake hits the snow pile or the bottom
+        const col = Math.round(p.x);
+        if (col >= 0 && col < snowAccum.length) {
+          const surfaceY = H - snowAccum[col];
+          if (p.y + p.r >= surfaceY) {
+            // Add to accumulation in a small radius for natural look
+            const spread = Math.floor(p.r * 3);
+            for (let dx = -spread; dx <= spread; dx++) {
+              const c = col + dx;
+              if (c >= 0 && c < snowAccum.length) {
+                const falloff = 1 - Math.abs(dx) / (spread + 1);
+                snowAccum[c] = Math.min(SNOW_MAX_HEIGHT, snowAccum[c] + SNOW_ACCUM_RATE * falloff);
+              }
+            }
+            // Reset flake to top
+            p.y = -p.r * 2;
+            p.x = Math.random() * W;
+            continue;
+          }
+        }
+
+        if (p.y > H + p.r) { p.y = -p.r * 2; p.x = Math.random() * W; }
+        if (p.x > W) p.x = 0;
+        if (p.x < 0) p.x = W;
+      }
+    } else if (fxType === "wind") {
+      for (const p of fxParticles) {
+        fxCtx.beginPath();
+        fxCtx.moveTo(p.x, p.y);
+        fxCtx.quadraticCurveTo(p.x + p.len * 0.5, p.y + p.curve, p.x + p.len, p.y + p.curve * 0.5);
+        fxCtx.strokeStyle = `rgba(220, 230, 240, ${p.opacity})`;
+        fxCtx.lineWidth = 1;
+        fxCtx.stroke();
+        p.x += p.speed;
+        if (p.x > W + p.len) { p.x = -p.len; p.y = Math.random() * H; }
+      }
+    }
+
+    // Draw lightning flash overlay
+    if (lightningActive && lightningFlash > 0) {
+      // Full-screen yellow flash
+      fxCtx.fillStyle = `rgba(255, 245, 180, ${lightningFlash * 0.25})`;
+      fxCtx.fillRect(0, 0, W, H);
+
+      // Draw bolt if active
+      if (lightningBolt && lightningFlash > 0.3) {
+        fxCtx.beginPath();
+        fxCtx.moveTo(lightningBolt[0].x, lightningBolt[0].y);
+        for (let i = 1; i < lightningBolt.length; i++) {
+          fxCtx.lineTo(lightningBolt[i].x, lightningBolt[i].y);
+        }
+        fxCtx.strokeStyle = `rgba(255, 250, 200, ${lightningFlash})`;
+        fxCtx.lineWidth = 3;
+        fxCtx.shadowColor = "rgba(255, 240, 150, 0.8)";
+        fxCtx.shadowBlur = 20;
+        fxCtx.stroke();
+
+        // Thinner bright core
+        fxCtx.beginPath();
+        fxCtx.moveTo(lightningBolt[0].x, lightningBolt[0].y);
+        for (let i = 1; i < lightningBolt.length; i++) {
+          fxCtx.lineTo(lightningBolt[i].x, lightningBolt[i].y);
+        }
+        fxCtx.strokeStyle = `rgba(255, 255, 220, ${lightningFlash})`;
+        fxCtx.lineWidth = 1.5;
+        fxCtx.shadowBlur = 0;
+        fxCtx.stroke();
+
+        fxCtx.shadowColor = "transparent";
+        fxCtx.shadowBlur = 0;
+      }
+
+      // Fade out
+      lightningFlash = Math.max(0, lightningFlash - 0.04);
+    }
+
+    fxAnimId = requestAnimationFrame(animateFX);
+  }
+
+  function generateBolt(W, H) {
+    const points = [];
+    let x = W * (0.2 + Math.random() * 0.6);
+    let y = 0;
+    const segments = 8 + Math.floor(Math.random() * 8);
+    const stepY = H / segments;
+    points.push({ x, y });
+    for (let i = 0; i < segments; i++) {
+      x += (Math.random() - 0.5) * 120;
+      y += stepY * (0.7 + Math.random() * 0.6);
+      points.push({ x, y });
+    }
+    // Ensure the last point reaches the bottom
+    points[points.length - 1].y = H;
+    return points;
+  }
+
+  // ── Synthesize thunder: sharp crack + rolling rumble ──
+  function playThunder() {
+    try {
+      const ctx = rainAudioCtx || (rainAudioCtx = new (window.AudioContext || window.webkitAudioContext)());
+      if (ctx.state === "suspended") ctx.resume();
+      const now = ctx.currentTime;
+      const delay = 0.3 + Math.random() * 0.8;
+
+      // ── CRACK: short burst of white noise, wide frequency ──
+      const crackDur = 0.12;
+      const crackSamples = Math.floor(crackDur * ctx.sampleRate);
+      const crackBuf = ctx.createBuffer(1, crackSamples, ctx.sampleRate);
+      const crackData = crackBuf.getChannelData(0);
+      for (let i = 0; i < crackSamples; i++) {
+        crackData[i] = (Math.random() * 2 - 1) * (1 - i / crackSamples);
+      }
+      const crackSrc = ctx.createBufferSource();
+      crackSrc.buffer = crackBuf;
+      const crackFilter = ctx.createBiquadFilter();
+      crackFilter.type = "bandpass";
+      crackFilter.frequency.value = 1800;
+      crackFilter.Q.value = 0.4;
+      const crackGain = ctx.createGain();
+      crackGain.gain.setValueAtTime(0, now + delay);
+      crackGain.gain.linearRampToValueAtTime(0.35, now + delay + 0.005);
+      crackGain.gain.exponentialRampToValueAtTime(0.001, now + delay + crackDur);
+      crackSrc.connect(crackFilter);
+      crackFilter.connect(crackGain);
+      crackGain.connect(ctx.destination);
+      crackSrc.start(now + delay);
+      crackSrc.stop(now + delay + crackDur + 0.01);
+
+      // ── RUMBLE: brownian noise, very low, rolling for 2-3s ──
+      const rumbleDur = 2 + Math.random() * 1.5;
+      const rumbleSamples = Math.floor(rumbleDur * ctx.sampleRate);
+      const rumbleBuf = ctx.createBuffer(1, rumbleSamples, ctx.sampleRate);
+      const rumbleData = rumbleBuf.getChannelData(0);
+      let last = 0;
+      for (let i = 0; i < rumbleSamples; i++) {
+        last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02;
+        rumbleData[i] = last * 3.5;
+      }
+      const rumbleSrc = ctx.createBufferSource();
+      rumbleSrc.buffer = rumbleBuf;
+      const rumbleLp = ctx.createBiquadFilter();
+      rumbleLp.type = "lowpass";
+      rumbleLp.frequency.value = 120;
+      rumbleLp.Q.value = 0.7;
+      const rumbleGain = ctx.createGain();
+      const rumbleStart = delay + 0.04;
+      rumbleGain.gain.setValueAtTime(0, now + rumbleStart);
+      rumbleGain.gain.linearRampToValueAtTime(0.18, now + rumbleStart + 0.08);
+      // Wobble the rumble for rolling effect
+      rumbleGain.gain.linearRampToValueAtTime(0.08, now + rumbleStart + 0.4);
+      rumbleGain.gain.linearRampToValueAtTime(0.13, now + rumbleStart + 0.7);
+      rumbleGain.gain.linearRampToValueAtTime(0.06, now + rumbleStart + 1.2);
+      rumbleGain.gain.exponentialRampToValueAtTime(0.001, now + rumbleStart + rumbleDur);
+      rumbleSrc.connect(rumbleLp);
+      rumbleLp.connect(rumbleGain);
+      rumbleGain.connect(ctx.destination);
+      rumbleSrc.start(now + rumbleStart);
+      rumbleSrc.stop(now + rumbleStart + rumbleDur + 0.1);
+    } catch (_) { /* audio unavailable */ }
+  }
+
+  function scheduleLightning() {
+    if (!lightningActive) return;
+    const delay = 2000 + Math.random() * 6000;
+    lightningTimer = setTimeout(() => {
+      if (!lightningActive) return;
+      const W = fxCanvas.width;
+      const H = fxCanvas.height;
+      lightningBolt = generateBolt(W, H);
+      lightningFlash = 1;
+      playThunder();
+      // Double flash effect
+      setTimeout(() => {
+        if (lightningActive) lightningFlash = 0.8;
+      }, 100);
+      scheduleLightning();
+    }, delay);
+  }
+
+  function stopLightning() {
+    lightningActive = false;
+    lightningFlash = 0;
+    lightningBolt = null;
+    if (lightningTimer) { clearTimeout(lightningTimer); lightningTimer = null; }
+  }
+
+  // ── Rain ambient sound via Web Audio API ──
+  let rainAudioCtx = null;
+  let rainNoiseSource = null;
+  let rainGainNode = null;
+  let rainFilterNode = null;
+  let rainHighFilter = null;
+
+  let rainDropInterval = null;
+
+  function startRainSound(intensity) {
+    try {
+      if (!rainAudioCtx) rainAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = rainAudioCtx;
+      if (ctx.state === "suspended") ctx.resume();
+
+      // If already playing, just adjust volume
+      if (rainNoiseSource) {
+        const vol = 0.01 + intensity * 0.04;
+        rainGainNode.gain.linearRampToValueAtTime(vol, ctx.currentTime + 0.5);
+        rainFilterNode.frequency.linearRampToValueAtTime(400 + intensity * 1000, ctx.currentTime + 0.5);
+        return;
+      }
+
+      // ── Layer 1: Soft pink noise bed ──
+      const sampleRate = ctx.sampleRate;
+      const bufferLen = sampleRate * 2;
+      const buffer = ctx.createBuffer(2, bufferLen, sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const data = buffer.getChannelData(ch);
+        let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+        for (let i = 0; i < bufferLen; i++) {
+          const white = Math.random() * 2 - 1;
+          b0 = 0.99886 * b0 + white * 0.0555179;
+          b1 = 0.99332 * b1 + white * 0.0750759;
+          b2 = 0.96900 * b2 + white * 0.1538520;
+          b3 = 0.86650 * b3 + white * 0.3104856;
+          b4 = 0.55000 * b4 + white * 0.5329522;
+          b5 = -0.7616 * b5 - white * 0.0168980;
+          data[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.08;
+          b6 = white * 0.115926;
+        }
+      }
+
+      rainNoiseSource = ctx.createBufferSource();
+      rainNoiseSource.buffer = buffer;
+      rainNoiseSource.loop = true;
+
+      rainFilterNode = ctx.createBiquadFilter();
+      rainFilterNode.type = "lowpass";
+      rainFilterNode.frequency.value = 400 + intensity * 1000;
+      rainFilterNode.Q.value = 0.5;
+
+      rainHighFilter = ctx.createBiquadFilter();
+      rainHighFilter.type = "highpass";
+      rainHighFilter.frequency.value = 250;
+      rainHighFilter.Q.value = 0.3;
+
+      rainGainNode = ctx.createGain();
+      rainGainNode.gain.value = 0.01 + intensity * 0.04;
+
+      rainNoiseSource.connect(rainFilterNode);
+      rainFilterNode.connect(rainHighFilter);
+      rainHighFilter.connect(rainGainNode);
+      rainGainNode.connect(ctx.destination);
+      rainNoiseSource.start();
+
+      // ── Layer 2: Pitter-patter drops (short percussive ticks) ──
+      startDrops(ctx, intensity);
+    } catch (_) { /* audio unavailable */ }
+  }
+
+  function startDrops(ctx, intensity) {
+    stopDrops();
+    const dropRate = Math.floor(400 - intensity * 340); // light=400ms, heavy=60ms between drops
+    rainDropInterval = setInterval(() => {
+      if (ctx.state !== "running") return;
+      playDrop(ctx, intensity);
+    }, dropRate);
+  }
+
+  function playDrop(ctx, intensity) {
+    try {
+      const now = ctx.currentTime;
+      // Short burst of noise shaped as a raindrop "tick"
+      const dropLen = 0.01 + Math.random() * 0.02;
+      const samples = Math.floor(dropLen * ctx.sampleRate);
+      const buf = ctx.createBuffer(1, samples, ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < samples; i++) {
+        // Exponential decay envelope baked in
+        d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (samples * 0.2));
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+
+      // Bandpass to give each drop a "tink" character
+      const bp = ctx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.value = 2000 + Math.random() * 4000;
+      bp.Q.value = 1 + Math.random() * 2;
+
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.02 + intensity * 0.08 + Math.random() * 0.03, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + dropLen + 0.02);
+
+      // Random panning for spatial effect
+      const pan = ctx.createStereoPanner();
+      pan.pan.value = Math.random() * 2 - 1;
+
+      src.connect(bp);
+      bp.connect(g);
+      g.connect(pan);
+      pan.connect(ctx.destination);
+      src.start(now);
+      src.stop(now + dropLen + 0.03);
+    } catch (_) {}
+  }
+
+  function stopDrops() {
+    if (rainDropInterval) {
+      clearInterval(rainDropInterval);
+      rainDropInterval = null;
+    }
+  }
+
+  function stopRainSound() {
+    stopDrops();
+    if (rainNoiseSource) {
+      try {
+        if (rainGainNode && rainAudioCtx) {
+          rainGainNode.gain.linearRampToValueAtTime(0, rainAudioCtx.currentTime + 0.5);
+          setTimeout(() => {
+            try { rainNoiseSource.stop(); } catch (_) {}
+            rainNoiseSource = null;
+            rainGainNode = null;
+            rainFilterNode = null;
+            rainHighFilter = null;
+          }, 600);
+        } else {
+          rainNoiseSource.stop();
+          rainNoiseSource = null;
+        }
+      } catch (_) {
+        rainNoiseSource = null;
+      }
+    }
+  }
+
+  function renderWeatherFX(data, name) {
+    // Easter egg: Swallow Falls, MD
+    const nameLC = (name || "").toLowerCase();
+    swallowFallsMode = nameLC.includes("swallow falls") || 
+      (nameLC.includes("oakland") && nameLC.includes("maryland"));
+
+    if (swallowFallsMode) {
+      fxType = null;
+      fxIntensity = 0;
+      stopLightning();
+      stopRainSound();
+      pendingRainIntensity = null;
+      spawnParticles();
+      if (!fxAnimId) animateFX();
+      return;
+    }
+
+    const code = data.current.weather_code;
+    const wind = data.current.wind_speed_10m;
+    const result = classifyWeatherFX(code, wind);
+    fxType = result.type;
+    fxIntensity = result.intensity;
+    spawnParticles();
+
+    // Lightning
+    stopLightning();
+    if (result.lightning) {
+      lightningActive = true;
+      scheduleLightning();
+    }
+
+    // Rain sound
+    if (result.type === "rain") {
+      pendingRainIntensity = result.intensity;
+      startRainSound(result.intensity);
+    } else {
+      pendingRainIntensity = null;
+      stopRainSound();
+    }
+
+    if (!fxAnimId) animateFX();
+  }
+
+  // ── Unlock audio on first user interaction ──
+  let pendingRainIntensity = null;
+  function resumeAllAudio() {
+    if (rainAudioCtx && rainAudioCtx.state === "suspended") {
+      rainAudioCtx.resume().then(() => {
+        if (pendingRainIntensity !== null && !rainNoiseSource) {
+          startRainSound(pendingRainIntensity);
+        }
+      });
+    }
+    if (pendingRainIntensity !== null && !rainNoiseSource) {
+      startRainSound(pendingRainIntensity);
+    }
+  }
+  document.addEventListener("click", resumeAllAudio);
+  document.addEventListener("keydown", resumeAllAudio);
+  document.addEventListener("touchstart", resumeAllAudio);
+
+  // ── Weather code → description & emoji ──
+  const WMO = {
+    0: ["Clear sky", "☀️"],
+    1: ["Mainly clear", "🌤️"],
+    2: ["Partly cloudy", "⛅"],
+    3: ["Overcast", "☁️"],
+    45: ["Fog", "🌫️"],
+    48: ["Freezing fog", "🌫️"],
+    51: ["Light drizzle", "🌦️"],
+    53: ["Moderate drizzle", "🌦️"],
+    55: ["Dense drizzle", "🌧️"],
+    56: ["Light freezing drizzle", "🌧️"],
+    57: ["Dense freezing drizzle", "🌧️"],
+    61: ["Slight rain", "🌦️"],
+    63: ["Moderate rain", "🌧️"],
+    65: ["Heavy rain", "🌧️"],
+    66: ["Light freezing rain", "🌧️"],
+    67: ["Heavy freezing rain", "🌧️"],
+    71: ["Slight snow", "🌨️"],
+    73: ["Moderate snow", "🌨️"],
+    75: ["Heavy snow", "❄️"],
+    77: ["Snow grains", "❄️"],
+    80: ["Slight showers", "🌦️"],
+    81: ["Moderate showers", "🌧️"],
+    82: ["Violent showers", "⛈️"],
+    85: ["Slight snow showers", "🌨️"],
+    86: ["Heavy snow showers", "❄️"],
+    95: ["Thunderstorm", "⛈️"],
+    96: ["Thunderstorm w/ hail", "⛈️"],
+    99: ["Thunderstorm w/ heavy hail", "⛈️"],
+  };
+
+  function weatherInfo(code) {
+    return WMO[code] || ["Unknown", "❓"];
+  }
+
+  // ── Degree → compass ──
+  function degToCompass(deg) {
+    const dirs = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+    return dirs[Math.round(deg / 22.5) % 16];
+  }
+
+  // ── Unit conversion helpers ──
+  function tempVal(c) {
+    return unit === "fahrenheit" ? (c * 9) / 5 + 32 : c;
+  }
+  function tempStr(c) {
+    const v = tempVal(c);
+    return `${Math.round(v)}°${unit === "fahrenheit" ? "F" : "C"}`;
+  }
+  function speedStr(kmh) {
+    return unit === "fahrenheit" ? `${(kmh * 0.621371).toFixed(1)} mph` : `${kmh.toFixed(1)} km/h`;
+  }
+  function precipStr(mm) {
+    if (unit === "fahrenheit") {
+      return `${(mm / 25.4).toFixed(2)} in`;
+    }
+    return `${mm} mm`;
+  }
+
+  // ── Date formatting ──
+  function formatDate(dateStr) {
+    const d = new Date(dateStr + "T00:00:00");
+    return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  }
+  function formatTime(isoStr) {
+    if (!isoStr) return "—";
+    const d = new Date(isoStr);
+    return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  }
+  function formatHour(isoStr) {
+    const d = new Date(isoStr);
+    return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  }
+
+  // ── API calls (Open-Meteo — no key needed) ──
+  async function geocode(query) {
+    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=20&language=en`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Geocoding failed");
+    const data = await res.json();
+    return data.results || [];
+  }
+
+  // Fallback geocoder using Nominatim (OpenStreetMap) for small towns
+  async function geocodeFallback(query) {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&addressdetails=1`;
+    const res = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.map(r => ({
+      name: r.address.city || r.address.town || r.address.village || r.name,
+      latitude: parseFloat(r.lat),
+      longitude: parseFloat(r.lon),
+      admin1: r.address.state || "",
+      country: r.address.country || "",
+      country_code: (r.address.country_code || "").toUpperCase(),
+    }));
+  }
+
+  async function fetchWeather(lat, lon, days) {
+    const params = new URLSearchParams({
+      latitude: lat,
+      longitude: lon,
+      current: [
+        "temperature_2m",
+        "relative_humidity_2m",
+        "apparent_temperature",
+        "precipitation",
+        "weather_code",
+        "cloud_cover",
+        "surface_pressure",
+        "wind_speed_10m",
+        "wind_direction_10m",
+        "uv_index",
+      ].join(","),
+      hourly: [
+        "temperature_2m",
+        "precipitation_probability",
+        "precipitation",
+        "weather_code",
+      ].join(","),
+      daily: [
+        "weather_code",
+        "temperature_2m_max",
+        "temperature_2m_min",
+        "sunrise",
+        "sunset",
+        "precipitation_sum",
+        "precipitation_probability_max",
+        "uv_index_max",
+        "wind_speed_10m_max",
+      ].join(","),
+      timezone: "auto",
+      forecast_days: days,
+    });
+    const url = `https://api.open-meteo.com/v1/forecast?${params}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Weather fetch failed");
+    return res.json();
+  }
+
+  // ── Show / hide helpers ──
+  function show(el) { el.classList.remove("hidden"); }
+  function hide(el) { el.classList.add("hidden"); }
+
+  function showLoading() { show(loadingEl); hide(errorEl); }
+  function hideLoading() { hide(loadingEl); }
+  function showError(msg) { errorEl.textContent = msg; show(errorEl); }
+
+  // ── Render current weather ──
+  let localTimeInterval = null;
+  let use24h = false;
+
+  function renderCurrent(data, name) {
+    const c = data.current;
+    const d = data.daily;
+    const [desc, icon] = weatherInfo(c.weather_code);
+
+    // Store both abbreviated and full-state versions for US cities
+    const abbrevName = cityNameWithAbbrev(name);
+    const fullName = cityNameWithFull(name);
+    const locEl = $("#location-name");
+    locEl.textContent = showFullState ? fullName : abbrevName;
+
+    // Only add toggle if the two forms differ (i.e. it's a US city with a state)
+    if (abbrevName !== fullName) {
+      locEl.style.cursor = "pointer";
+      locEl.title = "Click to toggle state name";
+      locEl.onclick = () => {
+        showFullState = !showFullState;
+        locEl.textContent = showFullState ? fullName : abbrevName;
+      };
+    } else {
+      locEl.style.cursor = "";
+      locEl.title = "";
+      locEl.onclick = null;
+    }
+
+    // Local time + timezone abbreviation, updating every minute
+    const tz = data.timezone;
+    function getTimeZoneAbbr(timeZone) {
+      try {
+        // Extract the real abbreviation from Intl formatter
+        const parts = new Intl.DateTimeFormat("en-US", {
+          timeZone: timeZone,
+          timeZoneName: "short",
+        }).formatToParts(new Date());
+        const tzPart = parts.find(p => p.type === "timeZoneName");
+        return tzPart ? tzPart.value : "";
+      } catch (_) {
+        return data.timezone_abbreviation || "";
+      }
+    }
+    function updateLocalTime() {
+      try {
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString("en-US", {
+          timeZone: tz,
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: !use24h,
+        });
+        const abbr = getTimeZoneAbbr(tz);
+        $("#local-time").textContent = `${timeStr} ${abbr}`;
+      } catch (_) {
+        $("#local-time").textContent = "";
+      }
+    }
+    if (localTimeInterval) clearInterval(localTimeInterval);
+    updateLocalTime();
+    localTimeInterval = setInterval(updateLocalTime, 1000);
+
+    // Toggle 12h/24h on click
+    $("#local-time").style.cursor = "pointer";
+    $("#local-time").title = "Click to toggle 12h/24h";
+    $("#local-time").onclick = () => {
+      use24h = !use24h;
+      updateLocalTime();
+    };
+
+    $("#current-date").textContent = new Date().toLocaleDateString(undefined, {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+    $("#weather-icon").textContent = icon;
+    $("#current-temp").textContent = tempStr(c.temperature_2m);
+    $("#weather-desc").textContent = desc;
+    $("#feels-like").textContent = `Feels like ${tempStr(c.apparent_temperature)}`;
+    $("#humidity").textContent = `${c.relative_humidity_2m}%`;
+    $("#wind").textContent = speedStr(c.wind_speed_10m);
+    $("#wind-dir").textContent = `${degToCompass(c.wind_direction_10m)} (${Math.round(c.wind_direction_10m)}°)`;
+    $("#precip").textContent = precipStr(c.precipitation);
+    $("#pressure").textContent = `${c.surface_pressure.toFixed(0)} hPa`;
+    $("#cloud-cover").textContent = `${c.cloud_cover}%`;
+    $("#uv-current").textContent = data.current.uv_index.toFixed(1);
+    $("#uv-index").textContent = d.uv_index_max[0].toFixed(1);
+
+    show($("#current-weather"));
+    setupDetailDrag();
+  }
+
+  // ── Drag-and-drop for detail cards ──
+  function setupDetailDrag() {
+    const grid = $(".current-details");
+    const cards = [...grid.querySelectorAll(".detail-card")];
+
+    // Restore saved order from localStorage
+    try {
+      const saved = JSON.parse(localStorage.getItem("detail_order"));
+      if (saved && saved.length === cards.length) {
+        const idMap = {};
+        cards.forEach(c => { idMap[c.querySelector(".detail-value").id] = c; });
+        saved.forEach(id => { if (idMap[id]) grid.appendChild(idMap[id]); });
+      }
+    } catch (_) {}
+
+    let dragEl = null;
+
+    grid.querySelectorAll(".detail-card").forEach(card => {
+      card.draggable = true;
+
+      card.addEventListener("dragstart", (e) => {
+        dragEl = card;
+        card.classList.add("dragging");
+        e.dataTransfer.effectAllowed = "move";
+      });
+
+      card.addEventListener("dragend", () => {
+        card.classList.remove("dragging");
+        grid.querySelectorAll(".detail-card").forEach(c => c.classList.remove("drag-over"));
+        dragEl = null;
+        // Save order
+        const order = [...grid.querySelectorAll(".detail-card")].map(c => c.querySelector(".detail-value").id);
+        try { localStorage.setItem("detail_order", JSON.stringify(order)); } catch (_) {}
+      });
+
+      card.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        if (card !== dragEl) card.classList.add("drag-over");
+      });
+
+      card.addEventListener("dragleave", () => {
+        card.classList.remove("drag-over");
+      });
+
+      card.addEventListener("drop", (e) => {
+        e.preventDefault();
+        card.classList.remove("drag-over");
+        if (dragEl && dragEl !== card) {
+          const allCards = [...grid.querySelectorAll(".detail-card")];
+          const fromIdx = allCards.indexOf(dragEl);
+          const toIdx = allCards.indexOf(card);
+          if (fromIdx < toIdx) {
+            grid.insertBefore(dragEl, card.nextSibling);
+          } else {
+            grid.insertBefore(dragEl, card);
+          }
+        }
+      });
+    });
+  }
+
+  // ── Render sun times ──
+  // ── Solar twilight calculation ──
+  // Compute sunrise/sunset for a given solar zenith angle
+  // zenith: 90.833 = standard sunrise/sunset, 96 = civil twilight (dawn/dusk)
+  function solarEvent(date, lat, lon, zenith, rising) {
+    const rad = Math.PI / 180;
+    const deg = 180 / Math.PI;
+
+    // Day of year
+    const start = new Date(date.getFullYear(), 0, 1);
+    const N = Math.floor((date - start) / 86400000) + 1;
+
+    // Sun's mean anomaly
+    const M = (0.9856 * N) - 3.289;
+
+    // Sun's true longitude
+    let L = M + (1.916 * Math.sin(M * rad)) + (0.020 * Math.sin(2 * M * rad)) + 282.634;
+    L = ((L % 360) + 360) % 360;
+
+    // Right ascension
+    let RA = Math.atan(0.91764 * Math.tan(L * rad)) * deg;
+    RA = ((RA % 360) + 360) % 360;
+
+    // RA in same quadrant as L
+    const Lq = Math.floor(L / 90) * 90;
+    const RAq = Math.floor(RA / 90) * 90;
+    RA += Lq - RAq;
+    RA /= 15; // to hours
+
+    // Sun's declination
+    const sinDec = 0.39782 * Math.sin(L * rad);
+    const cosDec = Math.cos(Math.asin(sinDec));
+
+    // Hour angle
+    const cosH = (Math.cos(zenith * rad) - sinDec * Math.sin(lat * rad)) / (cosDec * Math.cos(lat * rad));
+    if (cosH > 1 || cosH < -1) return null; // no event (polar)
+
+    let H = Math.acos(cosH) * deg;
+    if (rising) H = 360 - H;
+    H /= 15; // to hours
+
+    // Local mean time
+    const lngHour = lon / 15;
+    const t = N + ((rising ? 6 : 18) - lngHour) / 24;
+    const T = H + RA - (0.06571 * t) - 6.622;
+
+    // UTC time
+    let UT = ((T - lngHour) % 24 + 24) % 24;
+
+    const hours = Math.floor(UT);
+    const minutes = Math.round((UT - hours) * 60);
+    const result = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), hours, minutes));
+    return result;
+  }
+
+  function renderSunTimes(data) {
+    const d = data.daily;
+    const sunrise = d.sunrise[0];
+    const sunset = d.sunset[0];
+    const lat = data.latitude;
+    const lon = data.longitude;
+    const today = new Date(d.time[0] + "T12:00:00");
+
+    // Civil twilight: sun 6° below horizon (zenith = 96°)
+    const dawn = solarEvent(today, lat, lon, 96, true);
+    const dusk = solarEvent(today, lat, lon, 96, false);
+
+    $("#dawn").textContent = dawn ? formatTime(dawn.toISOString()) : "—";
+    $("#sunrise").textContent = formatTime(sunrise);
+    $("#sunset").textContent = formatTime(sunset);
+    $("#dusk").textContent = dusk ? formatTime(dusk.toISOString()) : "—";
+
+    show($("#sun-times"));
+  }
+
+  // ── Moon phase calculation ──
+  function getMoonPhase(date) {
+    // Compute moon age using a known new moon reference (Jan 6, 2000 18:14 UTC)
+    const refNew = new Date(Date.UTC(2000, 0, 6, 18, 14, 0));
+    const synodic = 29.53058770576;
+    const daysSince = (date.getTime() - refNew.getTime()) / 86400000;
+    const age = ((daysSince % synodic) + synodic) % synodic;
+    const illumination = (1 - Math.cos((age / synodic) * 2 * Math.PI)) / 2;
+
+    let name, icon;
+    if (age < 1.85)       { name = "New Moon";        icon = "🌑"; }
+    else if (age < 5.53)  { name = "Waxing Crescent"; icon = "🌒"; }
+    else if (age < 9.22)  { name = "First Quarter";   icon = "🌓"; }
+    else if (age < 12.91) { name = "Waxing Gibbous";  icon = "🌔"; }
+    else if (age < 16.61) { name = "Full Moon";        icon = "🌕"; }
+    else if (age < 20.30) { name = "Waning Gibbous";  icon = "🌖"; }
+    else if (age < 23.99) { name = "Last Quarter";    icon = "🌗"; }
+    else if (age < 27.68) { name = "Waning Crescent"; icon = "🌘"; }
+    else                   { name = "New Moon";        icon = "🌑"; }
+
+    return { name, icon, illumination: Math.round(illumination * 100), age: Math.round(age * 10) / 10 };
+  }
+
+  // ── Moonrise / Moonset calculation ──
+  // Low-precision lunar position → rise/set via iterative hourly search
+  function getMoonRiseSet(date, lat, lon) {
+    const rad = Math.PI / 180;
+    // Compute moon altitude at a given UTC Date
+    function moonAlt(dt) {
+      const T = (dt.getTime() / 86400000 - 10957.5) / 36525; // J2000 centuries
+      // Moon's ecliptic longitude (simplified)
+      const Lm = (218.316 + 481267.8813 * T) % 360;
+      const Mm = (134.963 + 477198.8676 * T) % 360;
+      const Fm = (93.272 + 483202.0175 * T) % 360;
+      const lonMoon = Lm + 6.289 * Math.sin(Mm * rad);
+      const latMoon = 5.128 * Math.sin(Fm * rad);
+      // Obliquity
+      const obl = 23.439 - 0.00000036 * (dt.getTime() / 86400000 - 10957.5);
+      // Ecliptic to equatorial
+      const cosObl = Math.cos(obl * rad), sinObl = Math.sin(obl * rad);
+      const cosLat = Math.cos(latMoon * rad), sinLat = Math.sin(latMoon * rad);
+      const cosLon = Math.cos(lonMoon * rad), sinLon = Math.sin(lonMoon * rad);
+      const ra = Math.atan2(sinLon * cosObl - sinLat / cosLat * sinObl, cosLon);
+      const dec = Math.asin(sinLat * cosObl + cosLat * sinObl * sinLon);
+      // Sidereal time at Greenwich
+      const GMST = (280.46061837 + 360.98564736629 * (dt.getTime() / 86400000 - 10957.5)) % 360;
+      const ha = (GMST + lon - ra / rad) * rad;
+      // Altitude
+      const sinAlt = Math.sin(lat * rad) * Math.sin(dec) + Math.cos(lat * rad) * Math.cos(dec) * Math.cos(ha);
+      return Math.asin(sinAlt) / rad;
+    }
+
+    // Scan 25 hours starting from midnight UTC of the given date
+    // looking for crossings of -0.833° (standard refraction + moon semidiameter)
+    const threshold = -0.833;
+    const startUTC = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+    let rise = null, set = null;
+    let prevAlt = moonAlt(new Date(startUTC));
+    for (let m = 10; m <= 24 * 60; m += 10) {
+      const t = new Date(startUTC + m * 60000);
+      const alt = moonAlt(t);
+      if (prevAlt <= threshold && alt > threshold && !rise) {
+        // Interpolate
+        const frac = (threshold - prevAlt) / (alt - prevAlt);
+        rise = new Date(startUTC + (m - 10 + frac * 10) * 60000);
+      }
+      if (prevAlt >= threshold && alt < threshold && !set) {
+        const frac = (threshold - prevAlt) / (alt - prevAlt);
+        set = new Date(startUTC + (m - 10 + frac * 10) * 60000);
+      }
+      prevAlt = alt;
+    }
+    return { rise, set };
+  }
+
+  function renderMoonPhase(data) {
+    const today = new Date(data.daily.time[0] + "T12:00:00");
+    const moon = getMoonPhase(today);
+    $("#moon-icon").textContent = moon.icon;
+    $("#moon-name").textContent = moon.name;
+    $("#moon-illumination").textContent = `${moon.illumination}% illuminated · Day ${moon.age} of cycle`;
+
+    const rs = getMoonRiseSet(today, data.latitude, data.longitude);
+    $("#moonrise").textContent = rs.rise ? formatTime(rs.rise.toISOString()) : "—";
+    $("#moonset").textContent = rs.set ? formatTime(rs.set.toISOString()) : "—";
+
+    show($("#moon-phase"));
+  }
+
+  // ── Render hourly forecast ──
+  function renderHourly(data) {
+    const h = data.hourly;
+    const container = $("#hourly-scroll");
+    container.innerHTML = "";
+
+    const now = new Date();
+    let startIdx = 0;
+    for (let i = 0; i < h.time.length; i++) {
+      if (new Date(h.time[i]) >= now) { startIdx = i; break; }
+    }
+
+    const count = Math.min(48, h.time.length - startIdx);
+    for (let i = startIdx; i < startIdx + count; i++) {
+      const [, icon] = weatherInfo(h.weather_code[i]);
+      const card = document.createElement("div");
+      card.className = "hourly-card";
+      card.innerHTML = `
+        <div class="hour">${formatHour(h.time[i])}</div>
+        <div class="h-icon">${icon}</div>
+        <div class="h-temp">${tempStr(h.temperature_2m[i])}</div>
+        <div class="h-precip">${h.precipitation_probability[i]}% 💧</div>
+      `;
+      container.appendChild(card);
+    }
+    show($("#hourly-section"));
+  }
+
+  // ── Render daily forecast ──
+  function renderDaily(data, days) {
+    const d = data.daily;
+    const container = $("#daily-forecast");
+    container.innerHTML = "";
+
+    const allMax = Math.max(...d.temperature_2m_max.slice(0, days));
+    const allMin = Math.min(...d.temperature_2m_min.slice(0, days));
+    const range = allMax - allMin || 1;
+
+    for (let i = 0; i < days && i < d.time.length; i++) {
+      const [, icon] = weatherInfo(d.weather_code[i]);
+      const lo = d.temperature_2m_min[i];
+      const hi = d.temperature_2m_max[i];
+      const leftPct = ((lo - allMin) / range) * 100;
+      const widthPct = ((hi - lo) / range) * 100;
+
+      const loF = (lo * 9) / 5 + 32;
+      const hiF = (hi * 9) / 5 + 32;
+      const loColor = tempFToColor(loF);
+      const hiColor = tempFToColor(hiF);
+
+      const row = document.createElement("div");
+      row.className = "daily-row";
+      row.innerHTML = `
+        <span class="daily-day">${i === 0 ? "Today" : formatDate(d.time[i])}</span>
+        <span class="daily-icon">${icon}</span>
+        <div class="daily-bar-wrap"><div class="daily-bar" style="left:${leftPct}%;width:${Math.max(widthPct, 4)}%;background:linear-gradient(90deg, ${loColor}, ${hiColor})"></div></div>
+        <span class="daily-lo">${tempStr(lo)}</span>
+        <span class="daily-hi">${tempStr(hi)}</span>
+      `;
+      container.appendChild(row);
+    }
+    show($("#forecast-section"));
+  }
+
+  // ── What to Wear recommendation ──
+  function renderAttire(data) {
+    const c = data.current;
+    const d = data.daily;
+    const feelsF = (c.apparent_temperature * 9) / 5 + 32;
+    const windKmh = c.wind_speed_10m;
+    const precipProb = d.precipitation_probability_max[0];
+    const uvIndex = d.uv_index_max[0];
+    const code = c.weather_code;
+    const items = [];
+
+    // Rain / snow codes
+    const isRain = [51,53,55,56,57,61,63,65,66,67,80,81,82,95,96,99].includes(code);
+    const isSnow = [71,73,75,77,85,86].includes(code);
+
+    // Umbrella
+    if (isRain || precipProb >= 50) {
+      items.push({ icon: "☂️", text: `<strong>Bring an umbrella!</strong> ${precipProb}% chance of precipitation today.` });
+    } else if (precipProb >= 30) {
+      items.push({ icon: "🌂", text: `<strong>Consider an umbrella</strong> — ${precipProb}% chance of rain.` });
+    } else {
+      items.push({ icon: "✅", text: precipProb === 0
+        ? `<strong>No umbrella needed.</strong> No chance of rain.`
+        : `<strong>No umbrella needed.</strong> Only ${precipProb}% chance of rain.` });
+    }
+
+    // Temperature-based clothing
+    if (feelsF <= 20) {
+      items.push({ icon: "🧥", text: "<strong>Heavy winter coat, thermal layers, insulated boots.</strong> It's dangerously cold — cover all exposed skin." });
+    } else if (feelsF <= 32) {
+      items.push({ icon: "🧥", text: "<strong>Winter coat, scarf, gloves, and a warm hat.</strong> Freezing temperatures outside." });
+    } else if (feelsF <= 45) {
+      items.push({ icon: "🧣", text: "<strong>Warm jacket or coat with layers.</strong> A scarf and light gloves are a good idea." });
+    } else if (feelsF <= 55) {
+      items.push({ icon: "🧶", text: "<strong>Sweater or fleece with a light jacket.</strong> Cool enough to want a layer." });
+    } else if (feelsF <= 65) {
+      items.push({ icon: "👕", text: "<strong>Long sleeves or a light layer.</strong> Comfortable but slightly cool." });
+    } else if (feelsF <= 75) {
+      items.push({ icon: "👕", text: "<strong>T-shirt and light pants.</strong> Perfect weather — dress comfortably." });
+    } else if (feelsF <= 85) {
+      items.push({ icon: "🩳", text: "<strong>Light, breathable clothing.</strong> Shorts and a t-shirt are ideal." });
+    } else {
+      items.push({ icon: "🥵", text: "<strong>Minimal, loose-fitting clothing.</strong> Stay hydrated — it's very hot out." });
+    }
+
+    // Wind advisory
+    if (windKmh >= 50) {
+      items.push({ icon: "💨", text: "<strong>Very windy!</strong> Secure loose items and wear a windbreaker." });
+    } else if (windKmh >= 30) {
+      items.push({ icon: "🌬️", text: "<strong>Breezy conditions.</strong> A windbreaker or layered jacket will help." });
+    }
+
+    // UV advisory (only before dusk)
+    const dusk = solarEvent(new Date(d.time[0] + "T12:00:00"), data.latitude, data.longitude, 96, false);
+    const now = new Date();
+    const pastDusk = dusk && now > dusk;
+    if (!pastDusk) {
+      if (uvIndex >= 8) {
+        items.push({ icon: "🧴", text: `<strong>UV index is ${uvIndex.toFixed(1)} — very high!</strong> Wear sunscreen, sunglasses, and a hat.` });
+      } else if (uvIndex >= 5) {
+        items.push({ icon: "🕶️", text: `<strong>UV index is ${uvIndex.toFixed(1)} — moderate to high.</strong> Sunscreen and sunglasses recommended.` });
+      }
+    }
+
+    // Snow gear
+    if (isSnow) {
+      items.push({ icon: "🥾", text: "<strong>Wear waterproof boots.</strong> Snow is falling — watch for slippery surfaces." });
+    }
+
+    const container = $("#attire-content");
+    container.innerHTML = items.map(i =>
+      `<div class="attire-item"><span class="attire-icon">${i.icon}</span><span class="attire-text">${i.text}</span></div>`
+    ).join("");
+    show($("#attire-section"));
+  }
+
+  // ── Chinese Zodiac (based on traditional Heavenly Stems & Earthly Branches 天干地支) ──
+  const ZODIAC_ANIMALS = [
+    { name: "Rat",     emoji: "🐀", element: "Water", branch: 0 },
+    { name: "Ox",      emoji: "🐂", element: "Earth", branch: 1 },
+    { name: "Tiger",   emoji: "🐅", element: "Wood",  branch: 2 },
+    { name: "Rabbit",  emoji: "🐇", element: "Wood",  branch: 3 },
+    { name: "Dragon",  emoji: "🐉", element: "Earth", branch: 4 },
+    { name: "Snake",   emoji: "🐍", element: "Fire",  branch: 5 },
+    { name: "Horse",   emoji: "🐎", element: "Fire",  branch: 6 },
+    { name: "Goat",    emoji: "🐐", element: "Earth", branch: 7 },
+    { name: "Monkey",  emoji: "🐒", element: "Metal", branch: 8 },
+    { name: "Rooster", emoji: "🐓", element: "Metal", branch: 9 },
+    { name: "Dog",     emoji: "🐕", element: "Earth", branch: 10 },
+    { name: "Pig",     emoji: "🐖", element: "Water", branch: 11 },
+  ];
+
+  // Chinese zodiac year
+  function getChineseZodiacYear(year) {
+    return ZODIAC_ANIMALS[(year - 4) % 12];
+  }
+
+  // ── Traditional Chinese almanac (黄历) daily branch calculation ──
+  // The 60-day Sexagenary cycle assigns an Earthly Branch (地支) to each day.
+  // Reference: Jan 1, 1900 = Geng-Wu day (Heavenly Stem 6, Earthly Branch 6 [Horse])
+  function getDailyEarthlyBranch(date) {
+    const ref = new Date(1900, 0, 1); // Jan 1 1900 = Earthly Branch 6 (Horse)
+    const days = Math.floor((date - ref) / 86400000);
+    return ((days + 6) % 12 + 12) % 12; // +6 because Jan 1 1900 is branch 6
+  }
+
+  // Traditional compatibility relationships from the Earthly Branches:
+  // Six Harmonies (六合): pairs that are most compatible
+  const SIX_HARMONIES = { 0:1, 1:0, 2:11, 3:10, 4:9, 5:8, 6:7, 7:6, 8:5, 9:4, 10:3, 11:2 };
+  // Three Harmonies (三合): triangular groups of 3 that support each other
+  const THREE_HARMONIES = [
+    [0, 4, 8],   // Water frame: Rat, Dragon, Monkey
+    [1, 5, 9],   // Metal frame: Ox, Snake, Rooster
+    [2, 6, 10],  // Fire frame: Tiger, Horse, Dog
+    [3, 7, 11],  // Wood frame: Rabbit, Goat, Pig
+  ];
+  // Six Clashes (六冲): opposing signs that clash
+  const SIX_CLASHES = { 0:6, 1:7, 2:8, 3:9, 4:10, 5:11, 6:0, 7:1, 8:2, 9:3, 10:4, 11:5 };
+
+  function getDailyZodiacFortune(date) {
+    const branch = getDailyEarthlyBranch(date);
+    const dayAnimal = ZODIAC_ANIMALS[branch];
+
+    // The day's branch animal and its harmony partners are lucky
+    const harmonyPartner = SIX_HARMONIES[branch];
+    const threeGroup = THREE_HARMONIES.find(g => g.includes(branch)) || [];
+    const clashSign = SIX_CLASHES[branch];
+
+    const lucky = new Set([harmonyPartner, ...threeGroup]);
+    lucky.delete(branch); // don't include the day's own sign as "lucky"
+
+    return { dayBranch: branch, dayAnimal, lucky, clash: clashSign };
+  }
+
+  function renderZodiac(data) {
+    // Use the selected city's timezone to get its local date
+    const tz = data.timezone;
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()).split("-");
+    const today = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+    const yearAnimal = getChineseZodiacYear(today.getFullYear());
+    const fortune = getDailyZodiacFortune(today);
+    const dayName = fortune.dayAnimal.name;
+
+    $("#zodiac-year").innerHTML =
+      `Year of the <strong>${yearAnimal.emoji} ${yearAnimal.name}</strong> (${yearAnimal.element}) · ` +
+      `Today's branch: <strong>${fortune.dayAnimal.emoji} ${dayName}</strong> day`;
+
+    let html = "";
+    for (let i = 0; i < 12; i++) {
+      const a = ZODIAC_ANIMALS[i];
+      const isDay = i === fortune.dayBranch;
+      const isLucky = fortune.lucky.has(i);
+      const isClash = i === fortune.clash;
+      let label = "";
+      let cls = "";
+      if (isDay) { label = "Day Sign"; cls = " day-sign"; }
+      else if (isLucky) { label = "★ Lucky"; cls = " lucky"; }
+      else if (isClash) { label = "⚠ Clash"; cls = " clash"; }
+      html += `<div class="zodiac-card${cls}">
+        <span class="zodiac-emoji">${a.emoji}</span>
+        <span class="zodiac-name">${a.name}</span>
+        ${label ? `<span class="zodiac-luck">${label}</span>` : ""}
+      </div>`;
+    }
+    $("#zodiac-lucky").innerHTML = html;
+    show($("#zodiac-section"));
+  }
+
+  // ── Draw simple canvas chart ──
+  function drawChart(canvasId, labels, datasets, yUnit) {
+    yUnit = yUnit || "";
+    const canvas = $(canvasId);
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const W = rect.width - 48;
+    const H = 200;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + "px";
+    canvas.style.height = H + "px";
+    ctx.scale(dpr, dpr);
+
+    const pad = { top: 20, right: 20, bottom: 36, left: 56 };
+    const plotW = W - pad.left - pad.right;
+    const plotH = H - pad.top - pad.bottom;
+
+    // Find global min/max
+    let gMin = Infinity, gMax = -Infinity;
+    for (const ds of datasets) {
+      for (const v of ds.values) {
+        if (v < gMin) gMin = v;
+        if (v > gMax) gMax = v;
+      }
+    }
+    if (gMin === gMax) { gMin -= 1; gMax += 1; }
+    const yRange = gMax - gMin;
+
+    // Background
+    ctx.fillStyle = "#1a2735";
+    ctx.fillRect(0, 0, W, H);
+
+    // Grid lines
+    ctx.strokeStyle = "#2a3a4a";
+    ctx.lineWidth = 0.5;
+    const gridLines = 5;
+    for (let i = 0; i <= gridLines; i++) {
+      const y = pad.top + (plotH / gridLines) * i;
+      ctx.beginPath();
+      ctx.moveTo(pad.left, y);
+      ctx.lineTo(W - pad.right, y);
+      ctx.stroke();
+
+      // Y labels
+      ctx.fillStyle = "#8899aa";
+      ctx.font = "11px sans-serif";
+      ctx.textAlign = "right";
+      const val = gMax - (yRange / gridLines) * i;
+      ctx.fillText(val.toFixed(1) + yUnit, pad.left - 6, y + 4);
+    }
+
+    // X labels (show a subset)
+    ctx.fillStyle = "#8899aa";
+    ctx.font = "10px sans-serif";
+    ctx.textAlign = "center";
+    const step = Math.max(1, Math.floor(labels.length / 7));
+    for (let i = 0; i < labels.length; i += step) {
+      const x = pad.left + (plotW / (labels.length - 1)) * i;
+      ctx.fillText(labels[i], x, H - pad.bottom + 18);
+    }
+
+    // Draw datasets
+    for (const ds of datasets) {
+      ctx.beginPath();
+      ctx.strokeStyle = ds.color;
+      ctx.lineWidth = 2;
+      for (let i = 0; i < ds.values.length; i++) {
+        const x = pad.left + (plotW / (ds.values.length - 1)) * i;
+        const y = pad.top + plotH - ((ds.values[i] - gMin) / yRange) * plotH;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      // Fill area
+      if (ds.fill) {
+        const last = ds.values.length - 1;
+        ctx.lineTo(pad.left + plotW, pad.top + plotH);
+        ctx.lineTo(pad.left, pad.top + plotH);
+        ctx.closePath();
+        ctx.fillStyle = ds.fill;
+        ctx.fill();
+      }
+    }
+  }
+
+  // ── Render precipitation chart ──
+  function renderPrecipChart(data, days) {
+    const d = data.daily;
+    const labels = [];
+    const values = [];
+    const isImperial = unit === "fahrenheit";
+    for (let i = 0; i < days && i < d.time.length; i++) {
+      labels.push(formatDate(d.time[i]).split(",")[0]);
+      values.push(isImperial ? d.precipitation_sum[i] / 25.4 : d.precipitation_sum[i]);
+    }
+    drawChart("#precip-chart", labels, [
+      { values, color: "#4fc3f7", fill: "rgba(79,195,247,0.15)" },
+    ], isImperial ? " in" : " mm");
+    show($("#precip-section"));
+  }
+
+  // ── Render temperature chart ──
+  function renderTempChart(data, days) {
+    const d = data.daily;
+    const labels = [];
+    const highs = [];
+    const lows = [];
+    for (let i = 0; i < days && i < d.time.length; i++) {
+      labels.push(formatDate(d.time[i]).split(",")[0]);
+      highs.push(tempVal(d.temperature_2m_max[i]));
+      lows.push(tempVal(d.temperature_2m_min[i]));
+    }
+    const tempUnit = unit === "fahrenheit" ? "°F" : "°C";
+    drawChart("#temp-chart", labels, [
+      { values: highs, color: "#ff9800", fill: "rgba(255,152,0,0.10)" },
+      { values: lows, color: "#4fc3f7", fill: "rgba(79,195,247,0.10)" },
+    ], tempUnit);
+    show($("#temp-chart-section"));
+  }
+
+  // ── Master render ──
+  function renderAll(data, name) {
+    weatherCache = data;
+    hideLoading();
+
+    // Hide everything first
+    [
+      "#current-weather", "#sun-times", "#moon-phase", "#hourly-section",
+      "#forecast-section", "#attire-section", "#zodiac-section",
+    ].forEach((s) => hide($(s)));
+
+    renderCurrent(data, name);
+    renderBackgroundGradient(data);
+    renderWeatherFX(data, name);
+    renderSunTimes(data);
+    renderMoonPhase(data);
+    renderHourly(data);
+    renderDaily(data, forecastDays);
+    renderAttire(data);
+    renderZodiac(data);
+  }
+
+  // ── Fetch and render for coordinates ──
+  async function loadWeather(lat, lon, name) {
+    showLoading();
+    hide(errorEl);
+    currentLat = lat;
+    currentLon = lon;
+    // Persist location for page refresh
+    try {
+      localStorage.setItem("weather_loc", JSON.stringify({ lat, lon, name }));
+    } catch (_) { /* storage unavailable */ }
+    try {
+      // Always fetch 14 days so we can toggle without re-fetching
+      const data = await fetchWeather(lat, lon, 14);
+      renderAll(data, name);
+    } catch (err) {
+      hideLoading();
+      showError("Failed to load weather data. Please try again.");
+    }
+  }
+
+  // ── Autocomplete search ──
+  function formatCityName(r) {
+    if (r.country_code === "US" && r.admin1) {
+      const abbr = US_STATES[r.admin1] || r.admin1;
+      return `${r.name}, ${abbr}, USA`;
+    }
+    return `${r.name}${r.admin1 ? ", " + r.admin1 : ""}${r.country ? ", " + r.country : ""}`;
+  }
+
+  let debounceTimer = null;
+  cityInput.addEventListener("input", () => {
+    clearTimeout(debounceTimer);
+    const q = cityInput.value.trim();
+    if (q.length < 2) { suggestionsEl.innerHTML = ""; return; }
+    debounceTimer = setTimeout(async () => {
+      try {
+        const results = await geocode(q);
+        results.sort((a, b) => (b.population || 0) - (a.population || 0));
+        suggestionsEl.innerHTML = "";
+        for (const r of results) {
+          const div = document.createElement("div");
+          div.className = "suggestion-item";
+          div.textContent = formatCityName(r);
+          div.addEventListener("click", () => {
+            cityInput.value = r.name;
+            suggestionsEl.innerHTML = "";
+            loadWeather(r.latitude, r.longitude, formatCityName(r));
+          });
+          suggestionsEl.appendChild(div);
+        }
+      } catch (_) { /* ignore */ }
+    }, 300);
+  });
+
+  // Close suggestions on outside click
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#search-bar") && !e.target.closest("#suggestions")) {
+      suggestionsEl.innerHTML = "";
+    }
+  });
+
+  // ── Search button ──
+  searchBtn.addEventListener("click", async () => {
+    const q = cityInput.value.trim();
+    if (!q) return;
+    suggestionsEl.innerHTML = "";
+    try {
+      // Parse "city, region" format
+      const parts = q.split(",").map(s => s.trim()).filter(Boolean);
+      const cityName = parts[0];
+      const regionHint = parts.slice(1).join(" ").toLowerCase();
+
+      let results = await geocode(cityName);
+      results.sort((a, b) => (b.population || 0) - (a.population || 0));
+      // If user provided a region/state/country hint, try to match it
+      let r = results[0] || null;
+      if (regionHint && results.length > 0) {
+        const match = results.find(res => {
+          const fields = [res.admin1, res.admin2, res.country, res.country_code]
+            .filter(Boolean).map(s => s.toLowerCase()).join(" ");
+          return fields.includes(regionHint) || regionHint.split(" ").some(word => word.length > 1 && fields.includes(word));
+        });
+        if (match) {
+          r = match;
+        } else {
+          // Primary API didn't match region — try fallback geocoder with full query
+          const fallback = await geocodeFallback(q);
+          if (fallback.length > 0) r = fallback[0];
+        }
+      }
+
+      // If primary returned nothing, try fallback with the full query
+      if (!r) {
+        const fallback = await geocodeFallback(q);
+        if (fallback.length > 0) r = fallback[0];
+      }
+
+      if (!r) { showError("City not found"); return; }
+
+      loadWeather(r.latitude, r.longitude, formatCityName(r));
+    } catch (_) {
+      showError("Search failed. Please try again.");
+    }
+  });
+
+  // Enter key triggers search
+  cityInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") searchBtn.click();
+  });
+
+  // ── Geolocation ──
+  locateBtn.addEventListener("click", () => {
+    if (!navigator.geolocation) { showError("Geolocation not supported"); return; }
+    showLoading();
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        loadWeather(pos.coords.latitude, pos.coords.longitude, "Your Location");
+      },
+      () => {
+        hideLoading();
+        showError("Location access denied.");
+      }
+    );
+  });
+
+  // ── Randomize button ──
+  const WORLD_CITIES = [
+    // Asia
+    [35.6762, 139.6503, "Tokyo, Japan"], [34.6937, 135.5023, "Osaka, Japan"],
+    [35.1796, 136.9066, "Nagoya, Japan"], [32.7503, 129.8777, "Nagasaki, Japan"],
+    [43.0621, 141.3544, "Sapporo, Japan"], [34.3853, 132.4553, "Hiroshima, Japan"],
+    [39.9042, 116.4074, "Beijing, China"], [31.2304, 121.4737, "Shanghai, China"],
+    [22.3193, 114.1694, "Hong Kong, China"], [39.0842, 117.2009, "Tianjin, China"],
+    [30.5728, 104.0668, "Chengdu, China"], [23.1291, 113.2644, "Guangzhou, China"],
+    [37.5665, 126.978, "Seoul, South Korea"], [35.1796, 129.0756, "Busan, South Korea"],
+    [25.033, 121.5654, "Taipei, Taiwan"],
+    [28.6139, 77.209, "New Delhi, India"], [19.076, 72.8777, "Mumbai, India"],
+    [13.0827, 80.2707, "Chennai, India"], [12.9716, 77.5946, "Bangalore, India"],
+    [13.7563, 100.5018, "Bangkok, Thailand"], [18.7883, 98.9853, "Chiang Mai, Thailand"],
+    [1.3521, 103.8198, "Singapore"], [14.5995, 120.9842, "Manila, Philippines"],
+    [21.0285, 105.8542, "Hanoi, Vietnam"], [-6.2088, 106.8456, "Jakarta, Indonesia"],
+    [3.139, 101.6869, "Kuala Lumpur, Malaysia"], [39.9199, 32.8543, "Ankara, Turkey"],
+    [41.0082, 28.9784, "Istanbul, Turkey"], [33.8886, 35.4955, "Beirut, Lebanon"],
+    [31.7683, 35.2137, "Jerusalem, Israel"], [25.2048, 55.2708, "Dubai, UAE"],
+    [24.4539, 54.3773, "Abu Dhabi, UAE"], [23.8859, 45.0792, "Riyadh, Saudi Arabia"],
+    [40.4093, 49.8671, "Baku, Azerbaijan"], [41.7151, 44.8271, "Tbilisi, Georgia"],
+    [47.9077, 106.9133, "Ulaanbaatar, Mongolia"], [27.7172, 85.324, "Kathmandu, Nepal"],
+    // Europe
+    [51.5074, -0.1278, "London, UK"], [48.8566, 2.3522, "Paris, France"],
+    [52.52, 13.405, "Berlin, Germany"], [48.2082, 16.3738, "Vienna, Austria"],
+    [55.7558, 37.6173, "Moscow, Russia"], [59.9343, 30.3351, "St. Petersburg, Russia"],
+    [59.3293, 18.0686, "Stockholm, Sweden"], [60.1699, 24.9384, "Helsinki, Finland"],
+    [64.1466, -21.9426, "Reykjavik, Iceland"], [69.6492, 18.9553, "Tromsø, Norway"],
+    [59.9139, 10.7522, "Oslo, Norway"], [55.6761, 12.5683, "Copenhagen, Denmark"],
+    [47.4979, 19.0402, "Budapest, Hungary"], [50.0755, 14.4378, "Prague, Czechia"],
+    [52.2297, 21.0122, "Warsaw, Poland"], [44.4268, 26.1025, "Bucharest, Romania"],
+    [42.6977, 23.3219, "Sofia, Bulgaria"], [37.9838, 23.7275, "Athens, Greece"],
+    [41.3874, 2.1686, "Barcelona, Spain"], [40.4168, -3.7038, "Madrid, Spain"],
+    [38.7223, -9.1393, "Lisbon, Portugal"], [43.7696, 11.2558, "Florence, Italy"],
+    [41.9028, 12.4964, "Rome, Italy"], [45.4408, 12.3155, "Venice, Italy"],
+    [46.2044, 6.1432, "Geneva, Switzerland"], [47.3769, 8.5417, "Zurich, Switzerland"],
+    [53.3498, -6.2603, "Dublin, Ireland"], [55.9533, -3.1883, "Edinburgh, UK"],
+    [50.8503, 4.3517, "Brussels, Belgium"], [52.3676, 4.9041, "Amsterdam, Netherlands"],
+    [78.2232, 15.6267, "Longyearbyen, Norway"],
+    // Africa
+    [30.0444, 31.2357, "Cairo, Egypt"], [-1.2921, 36.8219, "Nairobi, Kenya"],
+    [-33.9249, 18.4241, "Cape Town, South Africa"], [-26.2041, 28.0473, "Johannesburg, South Africa"],
+    [6.5244, 3.3792, "Lagos, Nigeria"], [5.6037, -0.187, "Accra, Ghana"],
+    [33.5731, -7.5898, "Casablanca, Morocco"], [36.8065, 3.0942, "Algiers, Algeria"],
+    [9.0249, 38.7469, "Addis Ababa, Ethiopia"], [-4.4419, 15.2663, "Kinshasa, DR Congo"],
+    [14.7167, -17.4677, "Dakar, Senegal"], [-6.7924, 39.2083, "Dar es Salaam, Tanzania"],
+    // United States
+    [40.7128, -74.006, "New York, NY, USA"], [34.0522, -118.2437, "Los Angeles, CA, USA"],
+    [41.8781, -87.6298, "Chicago, IL, USA"], [29.7604, -95.3698, "Houston, TX, USA"],
+    [33.4484, -112.074, "Phoenix, AZ, USA"], [29.9511, -90.0715, "New Orleans, LA, USA"],
+    [39.9526, -75.1652, "Philadelphia, PA, USA"], [32.7767, -96.797, "Dallas, TX, USA"],
+    [29.4241, -98.4936, "San Antonio, TX, USA"], [32.7157, -117.1611, "San Diego, CA, USA"],
+    [47.6062, -122.3321, "Seattle, WA, USA"], [37.7749, -122.4194, "San Francisco, CA, USA"],
+    [25.7617, -80.1918, "Miami, FL, USA"], [42.3601, -71.0589, "Boston, MA, USA"],
+    [33.749, -84.388, "Atlanta, GA, USA"], [39.7392, -104.9903, "Denver, CO, USA"],
+    [36.1627, -86.7816, "Nashville, TN, USA"], [30.2672, -97.7431, "Austin, TX, USA"],
+    [21.3069, -157.8583, "Honolulu, HI, USA"], [61.2181, -149.9003, "Anchorage, AK, USA"],
+    [27.3364, -82.5307, "Sarasota, FL, USA"], [28.5383, -81.3792, "Orlando, FL, USA"],
+    [27.9506, -82.4572, "Tampa, FL, USA"], [30.3322, -81.6557, "Jacksonville, FL, USA"],
+    [26.1224, -80.1373, "Fort Lauderdale, FL, USA"],
+    [35.2271, -80.8431, "Charlotte, NC, USA"], [35.7796, -78.6382, "Raleigh, NC, USA"],
+    [36.0726, -79.792, "Greensboro, NC, USA"],
+    [38.9072, -77.0369, "Washington, DC, USA"], [39.2904, -76.6122, "Baltimore, MD, USA"],
+    [37.5407, -77.436, "Richmond, VA, USA"], [36.8529, -75.978, "Virginia Beach, VA, USA"],
+    [40.4406, -79.9959, "Pittsburgh, PA, USA"], [43.0481, -76.1474, "Syracuse, NY, USA"],
+    [42.8864, -78.8784, "Buffalo, NY, USA"], [40.7282, -73.7949, "Long Island, NY, USA"],
+    [41.764, -72.6823, "Hartford, CT, USA"], [41.3083, -72.9279, "New Haven, CT, USA"],
+    [42.1015, -72.5898, "Springfield, MA, USA"], [41.824, -71.4128, "Providence, RI, USA"],
+    [43.661, -70.2568, "Portland, ME, USA"], [44.4759, -73.2121, "Burlington, VT, USA"],
+    [43.2081, -71.5376, "Concord, NH, USA"],
+    [38.2527, -85.7585, "Louisville, KY, USA"], [39.1031, -84.512, "Cincinnati, OH, USA"],
+    [41.4993, -81.6944, "Cleveland, OH, USA"], [39.9612, -82.9988, "Columbus, OH, USA"],
+    [42.3314, -83.0458, "Detroit, MI, USA"], [42.9634, -85.6681, "Grand Rapids, MI, USA"],
+    [43.0389, -87.9065, "Milwaukee, WI, USA"], [44.9778, -93.265, "Minneapolis, MN, USA"],
+    [41.2565, -95.9345, "Omaha, NE, USA"], [39.0997, -94.5786, "Kansas City, MO, USA"],
+    [38.627, -90.1994, "St. Louis, MO, USA"],
+    [46.8772, -96.7898, "Fargo, ND, USA"], [43.5446, -96.7311, "Sioux Falls, SD, USA"],
+    [40.8136, -96.7026, "Lincoln, NE, USA"],
+    [35.4676, -97.5164, "Oklahoma City, OK, USA"], [36.154, -95.9928, "Tulsa, OK, USA"],
+    [35.0844, -106.6504, "Albuquerque, NM, USA"], [32.2226, -110.9747, "Tucson, AZ, USA"],
+    [36.1699, -115.1398, "Las Vegas, NV, USA"], [39.5296, -119.8138, "Reno, NV, USA"],
+    [40.7608, -111.891, "Salt Lake City, UT, USA"], [43.615, -116.2023, "Boise, ID, USA"],
+    [45.5152, -122.6784, "Portland, OR, USA"], [44.058, -121.3153, "Bend, OR, USA"],
+    [36.7783, -119.4179, "Fresno, CA, USA"], [38.5816, -121.4944, "Sacramento, CA, USA"],
+    [36.6002, -121.8947, "Monterey, CA, USA"], [34.4208, -119.6982, "Santa Barbara, CA, USA"],
+    [33.4152, -111.8315, "Scottsdale, AZ, USA"],
+    [32.0809, -81.0912, "Savannah, GA, USA"], [34.8526, -82.394, "Greenville, SC, USA"],
+    [32.7765, -79.9311, "Charleston, SC, USA"],
+    [35.1495, -90.049, "Memphis, TN, USA"],
+    [35.0456, -85.3097, "Chattanooga, TN, USA"],
+    [64.8378, -147.7164, "Fairbanks, AK, USA"], [58.3005, -134.4197, "Juneau, AK, USA"],
+    [20.7984, -156.3319, "Kahului, HI, USA"],
+    // Canada
+    [45.4215, -75.6972, "Ottawa, Canada"], [49.2827, -123.1207, "Vancouver, Canada"],
+    [45.5017, -73.5673, "Montréal, Canada"], [43.6532, -79.3832, "Toronto, Canada"],
+    [51.0447, -114.0719, "Calgary, Canada"], [53.5461, -113.4938, "Edmonton, Canada"],
+    // Latin America & Caribbean
+    [19.4326, -99.1332, "Mexico City, Mexico"], [20.6597, -103.3496, "Guadalajara, Mexico"],
+    [23.1136, -82.3666, "Havana, Cuba"], [18.4861, -69.9312, "Santo Domingo, Dominican Republic"],
+    [9.9281, -84.0907, "San José, Costa Rica"],
+    // South America
+    [-22.9068, -43.1729, "Rio de Janeiro, Brazil"], [-23.5505, -46.6333, "São Paulo, Brazil"],
+    [-15.7975, -47.8919, "Brasília, Brazil"], [-34.6037, -58.3816, "Buenos Aires, Argentina"],
+    [-54.8019, -68.303, "Ushuaia, Argentina"], [-33.4489, -70.6693, "Santiago, Chile"],
+    [-12.0464, -77.0428, "Lima, Peru"], [4.711, -74.0721, "Bogotá, Colombia"],
+    [-0.1807, -78.4678, "Quito, Ecuador"], [-16.4897, -68.1193, "La Paz, Bolivia"],
+    [-34.9011, -56.1645, "Montevideo, Uruguay"],
+    // Oceania
+    [-33.8688, 151.2093, "Sydney, Australia"], [-37.8136, 144.9631, "Melbourne, Australia"],
+    [-27.4698, 153.0251, "Brisbane, Australia"], [-31.9505, 115.8605, "Perth, Australia"],
+    [-41.2865, 174.7762, "Wellington, New Zealand"], [-36.8485, 174.7633, "Auckland, New Zealand"],
+    [-17.7134, 178.065, "Suva, Fiji"],
+    // Easter egg
+    [39.4087, -79.4072, "Swallow Falls, Maryland, USA"],
+  ];
+  let lastRandomIdx = -1;
+  $("#random-btn").addEventListener("click", () => {
+    let idx;
+    do { idx = Math.floor(Math.random() * WORLD_CITIES.length); } while (idx === lastRandomIdx && WORLD_CITIES.length > 1);
+    lastRandomIdx = idx;
+    const city = WORLD_CITIES[idx];
+    cityInput.value = city[2].split(",")[0];
+    loadWeather(city[0], city[1], city[2]);
+  });
+
+  // ── Unit toggle ──
+  document.querySelectorAll(".unit-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".unit-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      unit = btn.dataset.unit;
+      if (weatherCache && currentLat !== null) {
+        renderAll(weatherCache, $("#location-name").textContent);
+      }
+    });
+  });
+
+  // ── Range toggle (7/14 days) ──
+  document.querySelectorAll(".range-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".range-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      forecastDays = parseInt(btn.dataset.days, 10);
+      if (weatherCache) {
+        renderDaily(weatherCache, forecastDays);
+      }
+    });
+  });
+
+  // ── Default: restore last city, else geolocation, else San Francisco ──
+  let savedLoc = null;
+  try {
+    savedLoc = JSON.parse(localStorage.getItem("weather_loc"));
+  } catch (_) { /* ignore */ }
+
+  if (savedLoc && savedLoc.lat && savedLoc.lon && savedLoc.name) {
+    loadWeather(savedLoc.lat, savedLoc.lon, cityNameWithAbbrev(savedLoc.name));
+  } else if (navigator.geolocation) {
+    showLoading();
+    navigator.geolocation.getCurrentPosition(
+      (pos) => loadWeather(pos.coords.latitude, pos.coords.longitude, "Your Location"),
+      () => loadWeather(37.7749, -122.4194, "San Francisco, USA")
+    );
+  } else {
+    loadWeather(37.7749, -122.4194, "San Francisco, USA");
+  }
+})();

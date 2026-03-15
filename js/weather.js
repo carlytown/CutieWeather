@@ -190,6 +190,7 @@
   let lightningTimer = null;
   let lightningBolt = null; // current bolt path to draw
   let swallowFallsMode = false; // Easter egg!
+  let swallowFallsParticles = [];
   let fireworksMode = false; // July 4th USA fireworks
   let fireworksShells = []; // active firework shells
   let fireworksPreview = false; // set to true to preview fireworks now
@@ -200,8 +201,13 @@
   let birthdaySparklePreview = false; // set to true to preview confetti now
   let newYearSparkleMode = false; // New Year's sparkles
   let nySparkleParticles = [];
+  let halloweenMode = false;
+  let halloweenParticles = [];
+  let halloweenPreview = false;
   let nightTwinkleMode = false;
   let twinkleStars = [];
+  let dayDustMode = false;
+  let dustMotes = [];
 
   // Snow accumulation: array of heights per pixel column
   let snowAccum = [];
@@ -254,17 +260,32 @@
   function spawnParticles() {
     fxParticles = [];
     if (swallowFallsMode) {
-      // Cloudy with a Chance of Meatballs!
-      const W = fxCanvas.width;
-      const H = fxCanvas.height;
+      // Cloudy with a Chance of Meatballs! — spawn DOM food rain
+      const layer = $("#emoji-rain-layer");
+      layer.innerHTML = "";
+      const W = window.innerWidth;
+      const H = window.innerHeight;
       const foods = ["🍝", "🧆", "🍖", "🥩", "🧀", "🍕", "🌭", "🥐", "🍞", "🥧", "🍰", "🧁", "🍗", "🥪"];
       const count = 30;
+      swallowFallsParticles = [];
       for (let i = 0; i < count; i++) {
-        fxParticles.push({
-          x: Math.random() * W,
-          y: Math.random() * H,
-          emoji: foods[Math.floor(Math.random() * foods.length)],
-          size: 16 + Math.random() * 24,
+        const el = document.createElement("span");
+        const emoji = foods[Math.floor(Math.random() * foods.length)];
+        const size = 20 + Math.random() * 24;
+        el.textContent = emoji;
+        el.style.fontSize = size + "px";
+        el.style.lineHeight = "1";
+        const x = Math.random() * W;
+        const y = Math.random() * H;
+        el.style.left = "0px";
+        el.style.top = "0px";
+        el.style.transform = `translate(${x}px, ${y}px)`;
+        layer.appendChild(el);
+        swallowFallsParticles.push({
+          el,
+          x,
+          y,
+          size,
           speed: 1 + Math.random() * 2.5,
           drift: (Math.random() - 0.5) * 0.8,
           wobble: Math.random() * Math.PI * 2,
@@ -309,15 +330,21 @@
         });
       }
     } else if (fxType === "wind") {
-      const count = Math.floor(40 * fxIntensity) + 10;
+      const count = Math.floor(20 * fxIntensity) + 8;
       for (let i = 0; i < count; i++) {
         fxParticles.push({
           x: Math.random() * W,
           y: Math.random() * H,
-          len: 30 + Math.random() * 60,
-          speed: 4 + Math.random() * 6 + fxIntensity * 4,
-          opacity: 0.06 + Math.random() * 0.1,
-          curve: Math.random() * 8 - 4,
+          rx: 60 + Math.random() * 100,
+          ry: 15 + Math.random() * 25,
+          rot: (Math.random() - 0.5) * 0.4,
+          drift: 3.5 + Math.random() * 4.0,
+          wobble: Math.random() * Math.PI * 2,
+          wobbleSpeed: 0.005 + Math.random() * 0.01,
+          wobbleAmp: 0.3 + Math.random() * 0.5,
+          opacity: 0.12 + Math.random() * 0.10,
+          fade: Math.random() * Math.PI * 2,
+          fadeSpeed: 0.006 + Math.random() * 0.012,
         });
       }
     }
@@ -329,7 +356,7 @@
     fxCtx.clearRect(0, 0, W, H);
 
     if (!fxType || fxParticles.length === 0) {
-      if (!swallowFallsMode && !fireworksMode && !cherryBlossomMode && !birthdaySparkleMode && !newYearSparkleMode && !nightTwinkleMode) {
+      if (!swallowFallsMode && !fireworksMode && !cherryBlossomMode && !birthdaySparkleMode && !newYearSparkleMode && !halloweenMode && !nightTwinkleMode && !dayDustMode) {
         fxAnimId = requestAnimationFrame(animateFX);
         return;
       }
@@ -344,23 +371,16 @@
     }
 
     // Easter egg: Swallow Falls food rain
-    if (swallowFallsMode && fxParticles.length > 0) {
-      for (const p of fxParticles) {
+    if (swallowFallsMode && swallowFallsParticles.length > 0) {
+      for (const p of swallowFallsParticles) {
         p.wobble += p.wobbleSpeed;
         p.rotation += p.rotSpeed;
-        fxCtx.save();
-        fxCtx.translate(p.x, p.y);
-        fxCtx.rotate(p.rotation);
-        fxCtx.font = `${p.size}px serif`;
-        fxCtx.textAlign = "center";
-        fxCtx.textBaseline = "middle";
-        fxCtx.fillText(p.emoji, 0, 0);
-        fxCtx.restore();
         p.x += p.drift + Math.sin(p.wobble) * 0.3;
         p.y += p.speed;
         if (p.y > H + p.size) { p.y = -p.size; p.x = Math.random() * W; }
         if (p.x > W) p.x = 0;
         if (p.x < 0) p.x = W;
+        p.el.style.transform = `translate(${p.x}px, ${p.y}px) rotate(${p.rotation}rad)`;
       }
       fxAnimId = requestAnimationFrame(animateFX);
       return;
@@ -484,16 +504,38 @@
         if (p.x < 0) p.x = W;
       }
     } else if (fxType === "wind") {
+      const isNight = document.body.classList.contains("night");
+      const windR = isNight ? 210 : 255;
+      const windG = isNight ? 222 : 255;
+      const windB = isNight ? 235 : 255;
+      const alphaBoost = isNight ? 1.0 : 1.8;
+      fxCtx.save();
       for (const p of fxParticles) {
+        const alpha = p.opacity * alphaBoost * (0.3 + 0.7 * Math.sin(p.fade));
+        if (alpha < 0.01) { p.fade += p.fadeSpeed; p.x += p.drift; continue; }
+        fxCtx.save();
+        fxCtx.translate(p.x, p.y);
+        fxCtx.rotate(p.rot + Math.sin(p.wobble) * 0.15);
+        fxCtx.scale(1, p.ry / p.rx);
+        const grad = fxCtx.createRadialGradient(0, 0, 0, 0, 0, p.rx);
+        grad.addColorStop(0, `rgba(${windR}, ${windG}, ${windB}, ${alpha})`);
+        grad.addColorStop(0.4, `rgba(${windR}, ${windG}, ${windB}, ${alpha * 0.5})`);
+        grad.addColorStop(1, `rgba(${windR}, ${windG}, ${windB}, 0)`);
+        fxCtx.fillStyle = grad;
         fxCtx.beginPath();
-        fxCtx.moveTo(p.x, p.y);
-        fxCtx.quadraticCurveTo(p.x + p.len * 0.5, p.y + p.curve, p.x + p.len, p.y + p.curve * 0.5);
-        fxCtx.strokeStyle = `rgba(220, 230, 240, ${p.opacity})`;
-        fxCtx.lineWidth = 1;
-        fxCtx.stroke();
-        p.x += p.speed;
-        if (p.x > W + p.len) { p.x = -p.len; p.y = Math.random() * H; }
+        fxCtx.arc(0, 0, p.rx, 0, Math.PI * 2);
+        fxCtx.fill();
+        fxCtx.restore();
+        p.x += p.drift;
+        p.y += Math.sin(p.wobble) * p.wobbleAmp;
+        p.wobble += p.wobbleSpeed;
+        p.fade += p.fadeSpeed;
+        if (p.x > W + p.rx * 2) {
+          p.x = -p.rx * 2;
+          p.y = Math.random() * H;
+        }
       }
+      fxCtx.restore();
     }
 
     // Draw lightning flash overlay
@@ -537,6 +579,9 @@
     // Night twinkle stars
     if (nightTwinkleMode) drawTwinkleStars(fxCtx, W, H);
 
+    // Daytime dust motes
+    if (dayDustMode) drawDustMotes(fxCtx, W, H);
+
     // Cherry blossoms overlay (draws on top of weather)
     if (cherryBlossomMode) drawCherryBlossoms(fxCtx, W, H);
 
@@ -545,6 +590,9 @@
 
     // New Year's sparkles overlay
     if (newYearSparkleMode) drawNYSparkles(fxCtx, W, H);
+
+    // Halloween emoji rain overlay
+    if (halloweenMode) drawHalloweenEmoji(fxCtx, W, H);
 
     fxAnimId = requestAnimationFrame(animateFX);
   }
@@ -920,6 +968,55 @@
     }
   }
 
+  // ── Halloween emoji rain ──
+  function spawnHalloweenEmoji() {
+    halloweenParticles = [];
+    const layer = $("#emoji-rain-layer");
+    layer.innerHTML = "";
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const emojis = ["🎃", "👻", "🦇", "🎃", "👻", "🦇", "🎃", "👻", "🕷️", "💀", "🍬"];
+    const count = 35;
+    for (let i = 0; i < count; i++) {
+      const el = document.createElement("span");
+      const emoji = emojis[Math.floor(Math.random() * emojis.length)];
+      const size = 20 + Math.random() * 24;
+      el.textContent = emoji;
+      el.style.fontSize = size + "px";
+      el.style.lineHeight = "1";
+      const x = Math.random() * W;
+      const y = Math.random() * H;
+      el.style.left = x + "px";
+      el.style.top = y + "px";
+      layer.appendChild(el);
+      halloweenParticles.push({
+        el,
+        x,
+        y,
+        size,
+        speed: 0.8 + Math.random() * 2,
+        drift: (Math.random() - 0.5) * 0.6,
+        wobble: Math.random() * Math.PI * 2,
+        wobbleSpeed: 0.01 + Math.random() * 0.02,
+        rotation: Math.random() * Math.PI * 2,
+        rotSpeed: (Math.random() - 0.5) * 0.02,
+      });
+    }
+  }
+
+  function drawHalloweenEmoji(ctx, W, H) {
+    for (const p of halloweenParticles) {
+      p.wobble += p.wobbleSpeed;
+      p.rotation += p.rotSpeed;
+      p.x += p.drift + Math.sin(p.wobble) * 0.4;
+      p.y += p.speed;
+      if (p.y > H + p.size) { p.y = -p.size; p.x = Math.random() * W; }
+      if (p.x > W) p.x = 0;
+      if (p.x < 0) p.x = W;
+      p.el.style.transform = `translate(${p.x}px, ${p.y}px) rotate(${p.rotation}rad)`;
+    }
+  }
+
   // ── Cherry blossom helpers ──
   function spawnBlossomPetals() {
     blossomPetals = [];
@@ -1074,6 +1171,12 @@
   }
 
   function renderWeatherFX(data, name) {
+    // Clean up DOM emoji layer on each render
+    const emojiLayer = $("#emoji-rain-layer");
+    emojiLayer.innerHTML = "";
+    swallowFallsParticles = [];
+    halloweenParticles = [];
+
     // July 4th fireworks for USA locations
     const nameLC = (name || "").toLowerCase();
     const today = new Date();
@@ -1119,6 +1222,12 @@
     newYearSparkleMode = isNewYear;
     if (newYearSparkleMode && nySparkleParticles.length === 0) spawnNYSparkles();
     if (!newYearSparkleMode) nySparkleParticles = [];
+
+    // Halloween: Oct 31 for all locations
+    const isHalloween = (mo === 9 && day === 31);
+    halloweenMode = isHalloween || halloweenPreview;
+    if (halloweenMode && halloweenParticles.length === 0) spawnHalloweenEmoji();
+    if (!halloweenMode) { halloweenParticles = []; $("#emoji-rain-layer").innerHTML = ""; }
 
     if (fireworksMode) {
       fxType = null;
@@ -1185,6 +1294,11 @@
     if (nightTwinkleMode && twinkleStars.length === 0) spawnTwinkleStars();
     if (!nightTwinkleMode) twinkleStars = [];
 
+    // Daytime dust motes
+    dayDustMode = !isNightFX && !fxType;
+    if (dayDustMode && dustMotes.length === 0) spawnDustMotes();
+    if (!dayDustMode) dustMotes = [];
+
     // Toggle night mode on body
     if (isNightFX) {
       document.body.classList.add("night");
@@ -1233,6 +1347,41 @@
       ctx.closePath();
       ctx.fill();
       ctx.restore();
+    }
+  }
+
+  function spawnDustMotes() {
+    const W = fxCanvas.width;
+    const H = fxCanvas.height;
+    dustMotes = [];
+    const count = Math.floor((W * H) / 12000);
+    for (let i = 0; i < count; i++) {
+      dustMotes.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: 1 + Math.random() * 1.5,
+        vx: (Math.random() - 0.4) * 0.15,
+        vy: -0.08 - Math.random() * 0.15,
+        phase: Math.random() * Math.PI * 2,
+        phaseSpeed: 0.008 + Math.random() * 0.012,
+        baseAlpha: 0.15 + Math.random() * 0.15,
+      });
+    }
+  }
+
+  function drawDustMotes(ctx, W, H) {
+    for (const m of dustMotes) {
+      m.phase += m.phaseSpeed;
+      m.x += m.vx + Math.sin(m.phase) * 0.1;
+      m.y += m.vy;
+      if (m.y < -5) { m.y = H + 5; m.x = Math.random() * W; }
+      if (m.x < -5) m.x = W + 5;
+      if (m.x > W + 5) m.x = -5;
+      const alpha = m.baseAlpha + Math.sin(m.phase * 1.5) * 0.04;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255, 240, 200, ${Math.max(0.02, alpha)})`;
+      ctx.fill();
     }
   }
 
@@ -1292,9 +1441,52 @@
     2: ["Partly cloudy", "☁️"],
   };
 
+  // Kawaii descriptions with emoticons
+  const KAWAII_DESC = {
+    0:  ["Clear sky~", "so sunny and happy! (˶ᵔ ᵕ ᵔ˶)"],
+    1:  ["Mainly clear~", "almost perfect skies! ꒰ᐢ. .ᐢ꒱"],
+    2:  ["Partly cloudy~", "peekaboo clouds~ (◍˃ ᗜ ˂◍)"],
+    3:  ["Overcast~", "cloudy and cozy ꒰ ꒡⌓꒡꒱"],
+    45: ["Foggy~", "so mysterious~ (⸝⸝⸝°_°⸝⸝⸝)"],
+    48: ["Freezing fog~", "chilly and hazy~ (꒦ິ꒳꒦ິ)"],
+    51: ["Light drizzle~", "tiny raindrops~ ꒰ᐢ. .ᐢ꒱₊˚⊹"],
+    53: ["Drizzle~", "pitter patter~ (っ˘з˘)っ"],
+    55: ["Heavy drizzle~", "drip drip drip~ ꒰˶  ˃ ᵕ ˂˶꒱"],
+    56: ["Freezing drizzle~", "icy little drops! (꒦ິ꒳꒦ິ)"],
+    57: ["Freezing drizzle~", "brrr~ cold and drippy! (꒦ິ꒳꒦ິ)"],
+    61: ["Light rain~", "bring an umbrella~! ꒰ᐢ. .ᐢ꒱"],
+    63: ["Rainy~", "splish splash~ (っ˘з˘)っ♡"],
+    65: ["Heavy rain~", "pouring down~! ꒰>⸝⸝⸝<꒱"],
+    66: ["Freezing rain~", "icy rain~! be careful! (꒦ິ꒳꒦ິ)"],
+    67: ["Freezing rain~", "slippery out there~! (꒦ິ꒳꒦ິ)"],
+    71: ["Light snow~", "snowflakes falling~ ꒰˶ᵔ ᵕ ᵔ˶꒱⊹"],
+    73: ["Snowy~", "it's a winter wonderland~! (˶ᵔ ᵕ ᵔ˶)♡"],
+    75: ["Heavy snow~", "so much snow~! ꒰˶  ˃ ᵕ ˂˶꒱⊹"],
+    77: ["Snow grains~", "tiny snow bits~ ꒰ᐢ. .ᐢ꒱"],
+    80: ["Light showers~", "quick little rain~ (◍˃ ᗜ ˂◍)"],
+    81: ["Showers~", "rain rain go away~ ꒰>⸝⸝⸝<꒱"],
+    82: ["Heavy showers~", "wild rain~! stay inside~! (⸝⸝> ᴗ <⸝⸝)"],
+    85: ["Snow showers~", "surprise snow~! ꒰˶ᵔ ᵕ ᵔ˶꒱"],
+    86: ["Heavy snow showers~", "snowy chaos~! ꒰˶  ˃ ᵕ ˂˶꒱"],
+    95: ["Thunderstorm~", "thunder rumbles~! ꒰>⸝⸝⸝<꒱"],
+    96: ["Hail storm~", "eek~! hail! (⸝⸝⸝°_°⸝⸝⸝)"],
+    99: ["Hail storm~", "scary hail~! stay safe! (꒦ິ꒳꒦ິ)"],
+  };
+
+  const KAWAII_DESC_NIGHT = {
+    0:  ["Clear night~", "stars are out~ ꒰ᐢ. .ᐢ꒱₊˚⊹"],
+    1:  ["Clear night~", "moonlit and lovely~ (˶ᵔ ᵕ ᵔ˶)"],
+    2:  ["Cloudy night~", "clouds drifting by~ ꒰ ꒡⌓꒡꒱"],
+  };
+
   function weatherInfo(code, isNight) {
     if (isNight && WMO_NIGHT[code]) return WMO_NIGHT[code];
     return WMO[code] || ["Unknown", "❓"];
+  }
+
+  function kawaiiDesc(code, isNight) {
+    if (isNight && KAWAII_DESC_NIGHT[code]) return KAWAII_DESC_NIGHT[code];
+    return KAWAII_DESC[code] || null;
   }
 
   // ── Degree → compass ──
@@ -1540,15 +1732,44 @@
       }
     };
 
-    // Greeting based on local time
+    // Greeting based on local time + weather
     try {
       const now = new Date();
       const localHourForGreeting = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(now), 10);
+      const code = c.weather_code;
+      const tempF = unit === "F" ? c.temperature_2m : c.temperature_2m * 9 / 5 + 32;
+      const isRainy = [51,53,55,61,63,65,80,81,82,95,96,99].includes(code);
+      const isSnowy = [71,73,75,77,85,86].includes(code);
+      const isCloudy = [2,3,45,48].includes(code);
+      const isSunny = [0,1].includes(code);
+      const isWindy = c.wind_speed_10m > 25;
+
       let greeting;
-      if (localHourForGreeting >= 5 && localHourForGreeting < 12) greeting = "Good morning! 🌸";
-      else if (localHourForGreeting >= 12 && localHourForGreeting < 17) greeting = "Good afternoon! ☀️";
-      else if (localHourForGreeting >= 17 && localHourForGreeting < 21) greeting = "Good evening! 🌷";
-      else greeting = "Good night! ✨";
+      if (localHourForGreeting >= 5 && localHourForGreeting < 12) {
+        if (isRainy) greeting = "rainy morning~ stay cozy! ꒰ᐢ. .ᐢ꒱₊˚⊹";
+        else if (isSnowy) greeting = "snow day morning~! ꒰˶  ˃ ᵕ ˂˶꒱♡⊹";
+        else if (tempF < 32) greeting = "brrr~ bundle up this morning! (꒦ິ꒳꒦ິ)";
+        else if (tempF > 90) greeting = "it's a hot one~ stay cool! (⸝⸝⸝°_°⸝⸝⸝)";
+        else if (isSunny) greeting = "good morning sunshine~! (ᵔ◡ᵔ)♡";
+        else greeting = "good morning~! ꒰ᐢ. .ᐢ꒱";
+      } else if (localHourForGreeting >= 12 && localHourForGreeting < 17) {
+        if (isRainy) greeting = "rainy afternoon~ perfect for tea ₊˚⊹(っ˘з˘)っ";
+        else if (isSnowy) greeting = "snowy afternoon~! so pretty ꒰˶ᵔ ᵕ ᵔ˶꒱⊹";
+        else if (isWindy) greeting = "windy out there~! hold on tight ꒰>⸝⸝⸝<꒱";
+        else if (tempF > 90) greeting = "so hot~ find some shade! (⸝⸝> ᴗ <⸝⸝)";
+        else if (isSunny) greeting = "happy afternoon~! ₊˚⊹(◍˃ ᗜ ˂◍)";
+        else greeting = "good afternoon~! (˶ᵔ ᵕ ᵔ˶)";
+      } else if (localHourForGreeting >= 17 && localHourForGreeting < 21) {
+        if (isRainy) greeting = "cozy rainy evening~ ꒰ᐢ. .ᐢ꒱₊˚⊹";
+        else if (isSnowy) greeting = "snowy evening~ time to get warm ꒰˶  ˃ ᵕ ˂˶꒱";
+        else if (isCloudy) greeting = "cloudy evening~ so dreamy ꒰ ꒡⌓꒡꒱";
+        else greeting = "good evening~! (ᵔ◡ᵔ)₊˚⊹";
+      } else {
+        if (isRainy) greeting = "rainy night~ sleep tight ꒰ᐢ⸝⸝•༝•⸝⸝ᐢ꒱♡";
+        else if (isSnowy) greeting = "snowy night~ so magical ꒰˶  ˃ ᵕ ˂˶꒱⊹";
+        else if (tempF < 32) greeting = "cold night~ stay warm! (꒦ິ꒳꒦ິ)♡";
+        else greeting = "good night~ sweet dreams ꒰ᐢ. .ᐢ꒱₊˚⊹";
+      }
       $("#greeting").textContent = greeting;
     } catch (_) { $("#greeting").textContent = ""; }
 
@@ -1560,9 +1781,13 @@
     });
     $("#weather-icon").textContent = icon;
     $("#current-temp").textContent = tempStr(c.temperature_2m);
-    $("#weather-desc").textContent = desc;
-    $("#feels-like").textContent = `Feels like ${tempStr(c.apparent_temperature)}`;
-    $("#high-low").textContent = `L: ${tempStr(d.temperature_2m_min[0])}  H: ${tempStr(d.temperature_2m_max[0])}`;
+    const kawaii = kawaiiDesc(c.weather_code, isNight);
+    if (kawaii) {
+      $("#weather-desc").textContent = `${kawaii[0]} ${kawaii[1]}`;
+    } else {
+      $("#weather-desc").textContent = desc;
+    }
+    $("#feels-hilo").textContent = `Feels like ${tempStr(c.apparent_temperature)}  ·  L: ${tempStr(d.temperature_2m_min[0])} // H: ${tempStr(d.temperature_2m_max[0])}`;
     $("#humidity").textContent = `${c.relative_humidity_2m}%`;
     $("#wind").textContent = speedStr(c.wind_speed_10m);
     $("#wind-dir").textContent = `${degToCompass(c.wind_direction_10m)} (${Math.round(c.wind_direction_10m)}°)`;
@@ -1577,6 +1802,92 @@
 
     show($("#current-weather"));
     setupDetailDrag();
+
+    // Update star mascot
+    updateStarMascot(c.weather_code, c.apparent_temperature, c.wind_speed_10m, isNight);
+  }
+
+  // ── Star Mascot ──
+  function updateStarMascot(code, apparentC, windKmh, isNight) {
+    const el = $("#star-mascot");
+    const faceEl = $("#mascot-face");
+    const speechEl = $("#mascot-speech");
+    if (!el) return;
+
+    const feelsF = (apparentC * 9) / 5 + 32;
+    const isRain = [51,53,55,56,57,61,63,65,66,67,80,81,82,95,96,99].includes(code);
+    const isSnow = [71,73,75,77,85,86].includes(code);
+    const isThunder = [95,96,99].includes(code);
+    const isFog = [45,48].includes(code);
+    const isWindy = windKmh > 30;
+
+    let face = "ᵔᴗᵔ";
+    let speech = "";
+    let anim = "bounce";
+
+    if (isThunder) {
+      face = ">⸝⸝<";
+      speech = "eek~! scary!!";
+      anim = "shiver";
+    } else if (isRain) {
+      face = "◕︵◕";
+      speech = "stay dry~!";
+      anim = "bounce";
+    } else if (isSnow) {
+      face = "˃ᴗ˂";
+      speech = "snow~! so pretty!";
+      anim = "bounce";
+    } else if (isFog) {
+      face = "꒡⌓꒡";
+      speech = "so mysterious~";
+      anim = "sleepy";
+    } else if (isNight) {
+      face = "ᵕ‿ᵕ";
+      speech = "sleepy time~ zzz";
+      anim = "sleepy";
+    } else if (feelsF <= 32) {
+      face = "꒦ິ꒳꒦ິ";
+      speech = "so c-cold~!";
+      anim = "shiver";
+    } else if (feelsF <= 50) {
+      face = "ˊ·ˋ";
+      speech = "a bit chilly~";
+      anim = "shiver";
+    } else if (isWindy) {
+      face = ">⸝⸝<";
+      speech = "whoaaa~!";
+      anim = "sway";
+    } else if (feelsF >= 90) {
+      face = "×﹏×";
+      speech = "too hot~!!";
+      anim = "sway";
+    } else if (feelsF >= 75) {
+      face = "ᵔᴗᵔ";
+      speech = "lovely day~!";
+      anim = "bounce";
+    } else {
+      face = "˶ᵔᴗᵔ˶";
+      speech = "perfect day~!";
+      anim = "bounce";
+    }
+
+    faceEl.textContent = face;
+    speechEl.textContent = speech;
+
+    el.classList.remove("shiver", "bounce", "sway", "sleepy");
+    el.classList.add(anim);
+    el.classList.add("visible");
+
+    // Click to cartwheel
+    el.onclick = () => {
+      el.classList.add("cartwheel");
+      el.addEventListener("animationend", function handler(e) {
+        if (e.animationName === "mascotCartwheel") {
+          el.classList.remove("cartwheel");
+          el.removeEventListener("animationend", handler);
+        }
+      });
+    };
   }
 
   async function fetchAQI(lat, lon) {
@@ -2226,39 +2537,39 @@
 
     // Umbrella
     if (isRain || precipProb >= 50) {
-      items.push({ icon: "☂️", text: `<strong>Bring an umbrella!</strong> ${precipProb}% chance of precipitation today.` });
+      items.push({ icon: "☂️", text: `<strong>grab your umbrella~!</strong> ${precipProb}% chance of rain today ꒰>⸝⸝⸝<꒱` });
     } else if (precipProb >= 30) {
-      items.push({ icon: "🌂", text: `<strong>Consider an umbrella</strong> — ${precipProb}% chance of rain.` });
+      items.push({ icon: "🌂", text: `<strong>maybe bring an umbrella~</strong> ${precipProb}% chance of rain, just in case! ꒰ᐢ. .ᐢ꒱` });
     } else {
-      items.push({ icon: "✅", text: precipProb === 0
-        ? `<strong>No umbrella needed.</strong> No chance of rain.`
-        : `<strong>No umbrella needed.</strong> Only ${precipProb}% chance of rain.` });
+      items.push({ icon: "☀️", text: precipProb === 0
+        ? `<strong>no umbrella needed~!</strong> zero chance of rain today (˶ᵔ ᵕ ᵔ˶)`
+        : `<strong>no umbrella needed~!</strong> only ${precipProb}% chance of rain ₊˚⊹` });
     }
 
     // Temperature-based clothing
     if (feelsF <= 20) {
-      items.push({ icon: "🥶", text: "<strong>Heavy winter coat, thermal layers, insulated boots.</strong> It's dangerously cold — cover all exposed skin!" });
+      items.push({ icon: "🥶", text: "<strong>bundle up in everything you own~!</strong> big puffy coat, thermals, boots, the works!! it's dangerously cold out there (꒦ິ꒳꒦ິ)" });
     } else if (feelsF <= 32) {
-      items.push({ icon: "🧣", text: "<strong>Winter coat, scarf, gloves, and a warm hat.</strong> Freezing temperatures outside!" });
+      items.push({ icon: "🧣", text: "<strong>cozy winter coat, scarf & gloves~!</strong> it's freezing outside, stay warm and toasty ꒰˶ ˃ ᵕ ˂˶꒱" });
     } else if (feelsF <= 40) {
-      items.push({ icon: "🧥", text: "<strong>Wear a jacket or coat with multiple layers.</strong> You want to stay warm!." });
+      items.push({ icon: "🧥", text: "<strong>layer up with a warm jacket~!</strong> it's chilly enough to want something snuggly ꒰ᐢ. .ᐢ꒱" });
     } else if (feelsF <= 55) {
-      items.push({ icon: "👖", text: "<strong>Sweater or fleece with a light jacket.</strong> Cool enough to want a layer!" });
+      items.push({ icon: "🧸", text: "<strong>sweater weather~!</strong> a cute fleece or hoodie with a light jacket is perfect (ᵔᴗᵔ)♡" });
     } else if (feelsF <= 65) {
-      items.push({ icon: "👚", text: "<strong>Long sleeves or a light layer.</strong> Comfortable but slightly cool!" });
+      items.push({ icon: "👚", text: "<strong>long sleeves or a light cardigan~!</strong> comfy and cute, just a tiny bit cool ₊˚⊹" });
     } else if (feelsF <= 75) {
-      items.push({ icon: "👗", text: "<strong>A blouse and skirt are ideal.</strong> Enjoy the perfect weather!" });
+      items.push({ icon: "👗", text: "<strong>your cutest outfit~!</strong> the weather is literally perfect for anything (˶ᵔ ᵕ ᵔ˶)♡" });
     } else if (feelsF <= 85) {
-      items.push({ icon: "👙", text: "<strong>Light, breathable clothing.</strong> Shorts and a t-shirt are ideal!" });
+      items.push({ icon: "🌺", text: "<strong>something light and breezy~!</strong> shorts, sundress, flowy tops — stay cool and cute (◍˃ ᗜ ˂◍)" });
     } else {
-      items.push({ icon: "🥵", text: "<strong>Minimal, loose-fitting clothing.</strong> Stay hydrated — it's super hot out!" });
+      items.push({ icon: "🧊", text: "<strong>as little as possible~!</strong> it's SO hot, wear the lightest thing you have and drink lots of water (⸝⸝×﹏×⸝⸝)" });
     }
 
     // Wind advisory
     if (windKmh >= 50) {
-      items.push({ icon: "💨", text: "<strong>Very windy!</strong> Secure loose items and wear a windbreaker." });
+      items.push({ icon: "💨", text: "<strong>super windy~!</strong> hold onto your hat and maybe grab a windbreaker ꒰>⸝⸝⸝<꒱" });
     } else if (windKmh >= 30) {
-      items.push({ icon: "🌬️", text: "<strong>Breezy conditions.</strong> A windbreaker or layered jacket will help." });
+      items.push({ icon: "🌬️", text: "<strong>a little breezy out~!</strong> a light jacket will keep the wind away ꒰ᐢ. .ᐢ꒱" });
     }
 
     // UV advisory (only before dusk)
@@ -2267,15 +2578,15 @@
     const pastDusk = dusk && now > dusk;
     if (!pastDusk) {
       if (uvIndex >= 8) {
-        items.push({ icon: "🧴", text: `<strong>UV index is ${uvIndex.toFixed(1)} — very high!</strong> Wear sunscreen, sunglasses, and a hat.` });
+        items.push({ icon: "🧴", text: `<strong>UV is ${uvIndex.toFixed(1)} — so strong~!</strong> sunscreen is a must, plus sunnies and a cute hat ☀️₊˚⊹` });
       } else if (uvIndex >= 5) {
-        items.push({ icon: "🕶️", text: `<strong>UV index is ${uvIndex.toFixed(1)} — moderate to high.</strong> Sunscreen and sunglasses recommended.` });
+        items.push({ icon: "🕶️", text: `<strong>UV is ${uvIndex.toFixed(1)} — don't forget sunscreen~!</strong> your skin will thank you later (ᵔᴗᵔ)` });
       }
     }
 
     // Snow gear
     if (isSnow) {
-      items.push({ icon: "🥾", text: "<strong>Wear waterproof boots.</strong> Snow is falling — watch for slippery surfaces." });
+      items.push({ icon: "🥾", text: "<strong>waterproof boots time~!</strong> snow is falling, watch your step on the slippery bits ꒰˶ᵔ ᵕ ᵔ˶꒱⊹" });
     }
 
     const container = $("#attire-content");
@@ -2562,7 +2873,12 @@
         const results = await geocode(q);
         results.sort((a, b) => (b.population || 0) - (a.population || 0));
         suggestionsEl.innerHTML = "";
+        suggestionIdx = -1;
+        const seen = new Set();
         for (const r of results) {
+          const label = formatCityName(r);
+          if (seen.has(label)) continue;
+          seen.add(label);
           const div = document.createElement("div");
           div.className = "suggestion-item";
           div.textContent = formatCityName(r);
@@ -2584,11 +2900,18 @@
     }
   });
 
+  // Select all text on focus for easy retyping
+  cityInput.addEventListener("focus", () => {
+    cityInput.select();
+  });
+
   // ── Search button ──
   searchBtn.addEventListener("click", async () => {
     const q = cityInput.value.trim();
     if (!q) return;
+    clearTimeout(debounceTimer);
     suggestionsEl.innerHTML = "";
+    cityInput.blur();
     try {
       // If the query is a known country name, go straight to capital
       const capital = COUNTRY_CAPITALS[q.toLowerCase().trim()];
@@ -2649,8 +2972,34 @@
   });
 
   // Enter key triggers search
+  let suggestionIdx = -1;
+  let suggestionOriginal = "";
+
   cityInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") searchBtn.click();
+    const items = suggestionsEl.querySelectorAll(".suggestion-item");
+    if (e.key === "ArrowDown" && items.length > 0) {
+      e.preventDefault();
+      if (suggestionIdx === -1) suggestionOriginal = cityInput.value;
+      suggestionIdx = Math.min(suggestionIdx + 1, items.length - 1);
+      items.forEach(el => el.classList.remove("active"));
+      items[suggestionIdx].classList.add("active");
+      cityInput.value = items[suggestionIdx].textContent;
+    } else if (e.key === "ArrowUp" && items.length > 0) {
+      e.preventDefault();
+      suggestionIdx = Math.max(suggestionIdx - 1, -1);
+      items.forEach(el => el.classList.remove("active"));
+      if (suggestionIdx >= 0) {
+        items[suggestionIdx].classList.add("active");
+        cityInput.value = items[suggestionIdx].textContent;
+      } else {
+        cityInput.value = suggestionOriginal;
+      }
+    } else if (e.key === "Enter") {
+      suggestionIdx = -1;
+      clearTimeout(debounceTimer);
+      suggestionsEl.innerHTML = "";
+      searchBtn.click();
+    }
   });
 
   // ── Geolocation ──
@@ -2783,6 +3132,7 @@
     // Easter egg
     [39.4087, -79.4072, "Swallow Falls, Maryland, USA"],
     [38.8816, -77.0910, "Arlington, VA, USA"],
+    [41.4040, -72.4526, "Chester, CT, USA"],
   ];
   let lastRandomIdx = -1;
   function triggerRandomCity() {
@@ -3034,4 +3384,89 @@
   } else {
     loadWeather(37.7749, -122.4194, "San Francisco, USA");
   }
+
+  // ── Sparkle effects (trail on desktop, click explosion everywhere) ──
+  const sparkleTrail = [];
+  const sparkleCanvas = document.createElement("canvas");
+  sparkleCanvas.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;pointer-events:none;";
+  document.body.appendChild(sparkleCanvas);
+  const sCtx = sparkleCanvas.getContext("2d");
+  sparkleCanvas.width = window.innerWidth;
+  sparkleCanvas.height = window.innerHeight;
+  window.addEventListener("resize", () => {
+    sparkleCanvas.width = window.innerWidth;
+    sparkleCanvas.height = window.innerHeight;
+  });
+
+  // Cursor trail (desktop only)
+  if (!("ontouchstart" in window)) {
+    document.addEventListener("mousemove", (e) => {
+      for (let i = 0; i < 2; i++) {
+        sparkleTrail.push({
+          x: e.clientX + (Math.random() - 0.5) * 12,
+          y: e.clientY + (Math.random() - 0.5) * 12,
+          size: 1.5 + Math.random() * 3,
+          life: 1,
+          decay: 0.015 + Math.random() * 0.02,
+          vx: (Math.random() - 0.5) * 0.8,
+          vy: (Math.random() - 0.5) * 0.8 + 0.3,
+          hue: Math.random(),
+        });
+      }
+    });
+  }
+
+  // Click/tap sparkle explosion (desktop + mobile)
+  function spawnClickSparkles(x, y) {
+    const count = 18 + Math.floor(Math.random() * 8);
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.5;
+      const speed = 1.5 + Math.random() * 3;
+      sparkleTrail.push({
+        x: x + (Math.random() - 0.5) * 6,
+        y: y + (Math.random() - 0.5) * 6,
+        size: 2 + Math.random() * 4,
+        life: 1,
+        decay: 0.012 + Math.random() * 0.015,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        hue: Math.random(),
+      });
+    }
+  }
+  document.addEventListener("click", (e) => spawnClickSparkles(e.clientX, e.clientY));
+  document.addEventListener("touchstart", (e) => {
+    const t = e.touches[0];
+    if (t) spawnClickSparkles(t.clientX, t.clientY);
+  }, { passive: true });
+
+  (function animateSparkles() {
+    sCtx.clearRect(0, 0, sparkleCanvas.width, sparkleCanvas.height);
+    for (let i = sparkleTrail.length - 1; i >= 0; i--) {
+      const p = sparkleTrail[i];
+      p.life -= p.decay;
+      if (p.life <= 0) { sparkleTrail.splice(i, 1); continue; }
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.03;
+      const alpha = p.life * 0.8;
+      const s = p.size * p.life;
+      const r = p.hue < 0.33 ? 255 : p.hue < 0.66 ? 255 : 220;
+      const g = p.hue < 0.33 ? 200 : p.hue < 0.66 ? 230 : 180;
+      const b = p.hue < 0.33 ? 220 : p.hue < 0.66 ? 255 : 255;
+      sCtx.save();
+      sCtx.translate(p.x, p.y);
+      sCtx.globalAlpha = alpha;
+      sCtx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
+      sCtx.lineWidth = 0.8;
+      sCtx.beginPath(); sCtx.moveTo(0, -s); sCtx.lineTo(0, s); sCtx.stroke();
+      sCtx.beginPath(); sCtx.moveTo(-s, 0); sCtx.lineTo(s, 0); sCtx.stroke();
+      sCtx.beginPath(); sCtx.arc(0, 0, s * 0.3, 0, Math.PI * 2);
+      sCtx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+      sCtx.fill();
+      sCtx.restore();
+    }
+    requestAnimationFrame(animateSparkles);
+  })();
+
 })();

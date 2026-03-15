@@ -27,6 +27,7 @@ body {
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 #app {
@@ -34,6 +35,7 @@ body {
   margin: 0 auto;
   padding: 20px 16px 120px;
   position: relative;
+  overflow-x: hidden;
 }
 
 #weather-fx {
@@ -465,9 +467,10 @@ canvas { width: 100% !important; border-radius: 8px; }
 @media (max-width: 600px) {
   .sun-grid { grid-template-columns: repeat(2, 1fr); }
   .score-grid { grid-template-columns: repeat(2, 1fr); }
-  .daily-row { grid-template-columns: 70px 30px 1fr 55px 55px; font-size: 0.8rem; }
+  .daily-row { grid-template-columns: 60px 30px 1fr 50px 50px; font-size: 0.8rem; }
   .current-details { grid-template-columns: repeat(2, 1fr); }
-  #city-input { width: 160px; }
+  #search-bar { flex-wrap: wrap; }
+  #city-input { width: 120px; }
 
   .moon-display {
     flex-wrap: wrap;
@@ -481,4 +484,27 @@ canvas { width: 100% !important; border-radius: 8px; }
 
   #zodiac-section { text-align: center; }
   .zodiac-lucky { justify-content: center; }
+}
+
+/* ── Night Mode ── */
+body.night {
+  --bg: #060b12;
+  --surface: #0a1018;
+  --surface2: #0f1820;
+  --accent2: #8ab4f8;
+}
+body.night .glass {
+  background: rgba(60, 90, 140, 0.15) !important;
+  border-color: rgba(100, 140, 200, 0.1);
+}
+body.night .detail-card {
+  background: rgba(60, 90, 140, 0.12);
+}
+body.night #search-btn,
+body.night #locate-btn {
+  background: rgba(60, 90, 140, 0.2);
+}
+body.night #city-input {
+  background: rgba(60, 90, 140, 0.15);
+  border-color: rgba(100, 140, 200, 0.1);
 }

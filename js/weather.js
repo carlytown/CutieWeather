@@ -96,10 +96,63 @@
     return `rgb(${r},${g},${b})`;
   }
 
+  function tempFToNightColor(f) {
+    const t = Math.max(-10, Math.min(110, f));
+    const stops = [
+      [-10,  8,  5, 45],    // -10°F – icy deep violet
+      [0,   12, 10, 55],    //  0°F  – cold indigo
+      [8,   14, 18, 68],    //  8°F  – frigid blue
+      [16,  16, 28, 78],    // 16°F  – dark sapphire
+      [24,  18, 38, 82],    // 24°F  – midnight blue
+      [32,  18, 45, 78],    // 32°F  – freezing teal-blue
+      [38,  16, 48, 68],    // 38°F  – cold teal
+      [44,  14, 48, 55],    // 44°F  – dark cyan
+      [50,  16, 44, 42],    // 50°F  – deep sea green
+      [56,  22, 40, 32],    // 56°F  – dark forest
+      [62,  30, 36, 26],    // 62°F  – olive night
+      [68,  38, 32, 22],    // 68°F  – warm dusk
+      [72,  48, 30, 20],    // 72°F  – dark amber
+      [76,  55, 28, 18],    // 76°F  – burnt sienna
+      [80,  60, 25, 16],    // 80°F  – dark copper
+      [84,  62, 22, 18],    // 84°F  – deep terracotta
+      [88,  60, 18, 20],    // 88°F  – dark rust
+      [92,  58, 14, 22],    // 92°F  – crimson night
+      [96,  55, 12, 25],    // 96°F  – dark garnet
+      [100, 50, 10, 28],    // 100°F – deep burgundy
+      [110, 42,  8, 30],    // 110°F – blackened wine
+    ];
+    let lo = stops[0], hi = stops[stops.length - 1];
+    for (let i = 0; i < stops.length - 1; i++) {
+      if (t >= stops[i][0] && t <= stops[i + 1][0]) {
+        lo = stops[i];
+        hi = stops[i + 1];
+        break;
+      }
+    }
+    const pct = (hi[0] === lo[0]) ? 0 : (t - lo[0]) / (hi[0] - lo[0]);
+    const r = Math.round(lo[1] + (hi[1] - lo[1]) * pct);
+    const g = Math.round(lo[2] + (hi[2] - lo[2]) * pct);
+    const b = Math.round(lo[3] + (hi[3] - lo[3]) * pct);
+    return `rgb(${r},${g},${b})`;
+  }
+
   // ── Render background gradient from hourly temperatures ──
   function renderBackgroundGradient(data) {
     const h = data.hourly;
     const firstDay = data.daily.time[0];
+
+    // Determine if nighttime at this location
+    const tz = data.timezone;
+    let isNightBG = false;
+    try {
+      const now = new Date();
+      const localHour = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(now), 10);
+      const srH = parseInt(data.daily.sunrise[0].slice(11, 13), 10);
+      const ssH = parseInt(data.daily.sunset[0].slice(11, 13), 10);
+      isNightBG = localHour < srH || localHour >= ssH;
+    } catch (_) {}
+
+    const colorFn = isNightBG ? tempFToNightColor : tempFToColor;
 
     // Build a 24-slot array (hour 0–23) for today
     const hourTemps = new Array(24).fill(null);
@@ -115,7 +168,7 @@
     for (let hr = 0; hr < 24; hr++) {
       if (hourTemps[hr] === null) continue;
       const f = (hourTemps[hr] * 9) / 5 + 32;
-      const color = tempFToColor(f);
+      const color = colorFn(f);
       const pct = (hr / 23) * 100; // 0=midnight at top, 23=11PM at bottom
       colorStops.push(`${color} ${pct.toFixed(1)}%`);
     }
@@ -147,6 +200,8 @@
   let birthdaySparklePreview = false; // set to true to preview confetti now
   let newYearSparkleMode = false; // New Year's sparkles
   let nySparkleParticles = [];
+  let nightTwinkleMode = false;
+  let twinkleStars = [];
 
   // Snow accumulation: array of heights per pixel column
   let snowAccum = [];
@@ -274,7 +329,7 @@
     fxCtx.clearRect(0, 0, W, H);
 
     if (!fxType || fxParticles.length === 0) {
-      if (!swallowFallsMode && !fireworksMode && !cherryBlossomMode && !birthdaySparkleMode && !newYearSparkleMode) {
+      if (!swallowFallsMode && !fireworksMode && !cherryBlossomMode && !birthdaySparkleMode && !newYearSparkleMode && !nightTwinkleMode) {
         fxAnimId = requestAnimationFrame(animateFX);
         return;
       }
@@ -478,6 +533,9 @@
       // Fade out
       lightningFlash = Math.max(0, lightningFlash - 0.04);
     }
+
+    // Night twinkle stars
+    if (nightTwinkleMode) drawTwinkleStars(fxCtx, W, H);
 
     // Cherry blossoms overlay (draws on top of weather)
     if (cherryBlossomMode) drawCherryBlossoms(fxCtx, W, H);
@@ -1112,7 +1170,70 @@
       stopRainSound();
     }
 
+    // Night twinkle stars
+    const tz = data.timezone;
+    let isNightFX = false;
+    try {
+      const now = new Date();
+      const dd = data.daily;
+      const localHour = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(now), 10);
+      const srH = parseInt(dd.sunrise[0].slice(11, 13), 10);
+      const ssH = parseInt(dd.sunset[0].slice(11, 13), 10);
+      isNightFX = localHour < srH || localHour >= ssH;
+    } catch (_) {}
+    nightTwinkleMode = isNightFX;
+    if (nightTwinkleMode && twinkleStars.length === 0) spawnTwinkleStars();
+    if (!nightTwinkleMode) twinkleStars = [];
+
+    // Toggle night mode on body
+    if (isNightFX) {
+      document.body.classList.add("night");
+    } else {
+      document.body.classList.remove("night");
+    }
+
     if (!fxAnimId) animateFX();
+  }
+
+  function spawnTwinkleStars() {
+    const W = fxCanvas.width;
+    const H = fxCanvas.height;
+    twinkleStars = [];
+    const count = Math.floor((W * H) / 8000);
+    for (let i = 0; i < count; i++) {
+      twinkleStars.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: 1 + Math.random() * 2.5,
+        phase: Math.random() * Math.PI * 2,
+        speed: 0.01 + Math.random() * 0.025,
+        baseAlpha: 0.2 + Math.random() * 0.3,
+      });
+    }
+  }
+
+  function drawTwinkleStars(ctx, W, H) {
+    for (const s of twinkleStars) {
+      s.phase += s.speed;
+      const alpha = s.baseAlpha + Math.sin(s.phase) * 0.45;
+      const a = Math.max(0.05, alpha);
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
+      ctx.beginPath();
+      const spikes = 4;
+      const outerR = s.r;
+      const innerR = s.r * 0.4;
+      for (let i = 0; i < spikes * 2; i++) {
+        const r = i % 2 === 0 ? outerR : innerR;
+        const angle = (i * Math.PI) / spikes - Math.PI / 2;
+        const method = i === 0 ? "moveTo" : "lineTo";
+        ctx[method](Math.cos(angle) * r, Math.sin(angle) * r);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
   }
 
   // ── Unlock audio on first user interaction ──
@@ -1228,9 +1349,46 @@
     return data.results || [];
   }
 
+  // Common country-to-capital mapping for country name searches
+  const COUNTRY_CAPITALS = {
+    "india": "New Delhi", "china": "Beijing", "japan": "Tokyo", "france": "Paris",
+    "germany": "Berlin", "italy": "Rome", "spain": "Madrid", "uk": "London",
+    "united kingdom": "London", "england": "London", "brazil": "Brasília",
+    "australia": "Canberra", "canada": "Ottawa", "mexico": "Mexico City",
+    "russia": "Moscow", "south korea": "Seoul", "korea": "Seoul",
+    "argentina": "Buenos Aires", "egypt": "Cairo", "turkey": "Istanbul",
+    "thailand": "Bangkok", "vietnam": "Hanoi", "indonesia": "Jakarta",
+    "philippines": "Manila", "malaysia": "Kuala Lumpur", "singapore": "Singapore",
+    "south africa": "Cape Town", "nigeria": "Lagos", "kenya": "Nairobi",
+    "morocco": "Casablanca", "colombia": "Bogotá", "peru": "Lima",
+    "chile": "Santiago", "sweden": "Stockholm", "norway": "Oslo",
+    "denmark": "Copenhagen", "finland": "Helsinki", "iceland": "Reykjavik",
+    "portugal": "Lisbon", "greece": "Athens", "ireland": "Dublin",
+    "netherlands": "Amsterdam", "belgium": "Brussels", "switzerland": "Zurich",
+    "austria": "Vienna", "poland": "Warsaw", "czech republic": "Prague",
+    "czechia": "Prague", "hungary": "Budapest", "romania": "Bucharest",
+    "ukraine": "Kyiv", "saudi arabia": "Riyadh", "uae": "Dubai",
+    "israel": "Jerusalem", "new zealand": "Auckland", "taiwan": "Taipei",
+    "pakistan": "Islamabad", "bangladesh": "Dhaka", "sri lanka": "Colombo",
+    "nepal": "Kathmandu", "cuba": "Havana", "jamaica": "Kingston",
+    "costa rica": "San José", "panama": "Panama City", "ecuador": "Quito",
+    "bolivia": "La Paz", "uruguay": "Montevideo", "paraguay": "Asunción",
+    "venezuela": "Caracas", "guatemala": "Guatemala City",
+    "ethiopia": "Addis Ababa", "ghana": "Accra", "tanzania": "Dar es Salaam",
+    "uganda": "Kampala", "algeria": "Algiers", "tunisia": "Tunis",
+    "lebanon": "Beirut", "jordan": "Amman", "iraq": "Baghdad", "iran": "Tehran",
+    "afghanistan": "Kabul", "mongolia": "Ulaanbaatar", "myanmar": "Yangon",
+    "cambodia": "Phnom Penh", "laos": "Vientiane", "fiji": "Suva",
+    "scotland": "Edinburgh", "wales": "Cardiff",
+  };
+
   // Fallback geocoder using Nominatim (OpenStreetMap) for small towns
   async function geocodeFallback(query) {
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&addressdetails=1`;
+    // If the query is a known country name, search for its capital instead
+    const capital = COUNTRY_CAPITALS[query.toLowerCase().trim()];
+    const searchQuery = capital || query;
+
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchQuery)}&format=json&limit=5&addressdetails=1`;
     const res = await fetch(url, { headers: { "Accept": "application/json" } });
     if (!res.ok) return [];
     const data = await res.json();
@@ -1308,10 +1466,8 @@
     try {
       const now = new Date();
       const localHour = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(now), 10);
-      const sr = new Date(d.sunrise[0]);
-      const ss = new Date(d.sunset[0]);
-      const srH = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "numeric", hour12: false }).formatToParts(sr).find(p => p.type === "hour").value, 10);
-      const ssH = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "numeric", hour12: false }).formatToParts(ss).find(p => p.type === "hour").value, 10);
+      const srH = parseInt(d.sunrise[0].slice(11, 13), 10);
+      const ssH = parseInt(d.sunset[0].slice(11, 13), 10);
       isNight = localHour < srH || localHour >= ssH;
     } catch (_) { /* fallback to daytime */ }
 
@@ -1736,6 +1892,10 @@
     return d.toLocaleTimeString(undefined, opts);
   }
 
+  const sunScoreCallLog = [];
+  const SUN_SCORE_RATE_LIMIT = 7;
+  const SUN_SCORE_RATE_WINDOW = 60000; // 1 minute
+
   async function fetchSunScore(lat, lon, date, type) {
     const cacheKey = `sunscore_${lat.toFixed(2)}_${lon.toFixed(2)}_${date}_${type}`;
     try {
@@ -1746,6 +1906,11 @@
         localStorage.removeItem(cacheKey);
       }
     } catch (_) {}
+    // Rate limit: skip API call if too many recent requests
+    const now = Date.now();
+    while (sunScoreCallLog.length && now - sunScoreCallLog[0] > SUN_SCORE_RATE_WINDOW) sunScoreCallLog.shift();
+    if (sunScoreCallLog.length >= SUN_SCORE_RATE_LIMIT) return null;
+    sunScoreCallLog.push(now);
     const url = `https://api.sunsethue.com/event?latitude=${lat}&longitude=${lon}&date=${date}&type=${type}&key=${encodeURIComponent(SUNSETHUE_API_KEY)}`;
     const res = await fetch(url);
     if (!res.ok) return null;
@@ -2072,21 +2237,21 @@
 
     // Temperature-based clothing
     if (feelsF <= 20) {
-      items.push({ icon: "🧥", text: "<strong>Heavy winter coat, thermal layers, insulated boots.</strong> It's dangerously cold — cover all exposed skin." });
+      items.push({ icon: "🥶", text: "<strong>Heavy winter coat, thermal layers, insulated boots.</strong> It's dangerously cold — cover all exposed skin!" });
     } else if (feelsF <= 32) {
-      items.push({ icon: "🧥", text: "<strong>Winter coat, scarf, gloves, and a warm hat.</strong> Freezing temperatures outside." });
-    } else if (feelsF <= 45) {
-      items.push({ icon: "🧣", text: "<strong>Warm jacket or coat with layers.</strong> A scarf and light gloves are a good idea." });
+      items.push({ icon: "🧣", text: "<strong>Winter coat, scarf, gloves, and a warm hat.</strong> Freezing temperatures outside!" });
+    } else if (feelsF <= 40) {
+      items.push({ icon: "🧥", text: "<strong>Wear a jacket or coat with multiple layers.</strong> You want to stay warm!." });
     } else if (feelsF <= 55) {
-      items.push({ icon: "👔", text: "<strong>Sweater or fleece with a light jacket.</strong> Cool enough to want a layer." });
+      items.push({ icon: "👖", text: "<strong>Sweater or fleece with a light jacket.</strong> Cool enough to want a layer!" });
     } else if (feelsF <= 65) {
-      items.push({ icon: "👕", text: "<strong>Long sleeves or a light layer.</strong> Comfortable but slightly cool." });
+      items.push({ icon: "👚", text: "<strong>Long sleeves or a light layer.</strong> Comfortable but slightly cool!" });
     } else if (feelsF <= 75) {
-      items.push({ icon: "👕", text: "<strong>T-shirt and light pants.</strong> Perfect weather — dress comfortably." });
+      items.push({ icon: "👗", text: "<strong>A blouse and skirt are ideal.</strong> Enjoy the perfect weather!" });
     } else if (feelsF <= 85) {
-      items.push({ icon: "🩳", text: "<strong>Light, breathable clothing.</strong> Shorts and a t-shirt are ideal." });
+      items.push({ icon: "👙", text: "<strong>Light, breathable clothing.</strong> Shorts and a t-shirt are ideal!" });
     } else {
-      items.push({ icon: "🥵", text: "<strong>Minimal, loose-fitting clothing.</strong> Stay hydrated — it's very hot out." });
+      items.push({ icon: "🥵", text: "<strong>Minimal, loose-fitting clothing.</strong> Stay hydrated — it's super hot out!" });
     }
 
     // Wind advisory
@@ -2384,7 +2549,7 @@
       const abbr = US_STATES[r.admin1] || r.admin1;
       return `${r.name}, ${abbr}, USA`;
     }
-    return `${r.name}${r.admin1 ? ", " + r.admin1 : ""}${r.country ? ", " + r.country : ""}`;
+    return `${r.name}${r.country ? ", " + r.country : ""}`;
   }
 
   let debounceTimer = null;
@@ -2425,6 +2590,18 @@
     if (!q) return;
     suggestionsEl.innerHTML = "";
     try {
+      // If the query is a known country name, go straight to capital
+      const capital = COUNTRY_CAPITALS[q.toLowerCase().trim()];
+      if (capital) {
+        const results = await geocode(capital);
+        results.sort((a, b) => (b.population || 0) - (a.population || 0));
+        if (results.length > 0) {
+          const r = results[0];
+          loadWeather(r.latitude, r.longitude, formatCityName(r));
+          return;
+        }
+      }
+
       // Parse "city, region" format
       const parts = q.split(",").map(s => s.trim()).filter(Boolean);
       const cityName = parts[0];
@@ -2432,6 +2609,14 @@
 
       let results = await geocode(cityName);
       results.sort((a, b) => (b.population || 0) - (a.population || 0));
+
+      // Check if the query might be a country name (no city results match well)
+      const qLower = q.toLowerCase().trim();
+      const looksLikeCountry = results.length === 0 || results.every(r =>
+        (r.country || "").toLowerCase() === qLower ||
+        (r.country_code || "").toLowerCase() === qLower
+      );
+
       // If user provided a region/state/country hint, try to match it
       let r = results[0] || null;
       if (regionHint && results.length > 0) {
@@ -2449,8 +2634,8 @@
         }
       }
 
-      // If primary returned nothing, try fallback with the full query
-      if (!r) {
+      // If primary returned nothing or query looks like a country, try fallback
+      if (!r || (looksLikeCountry && !regionHint)) {
         const fallback = await geocodeFallback(q);
         if (fallback.length > 0) r = fallback[0];
       }

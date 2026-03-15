@@ -1406,6 +1406,7 @@
     $("#current-temp").textContent = tempStr(c.temperature_2m);
     $("#weather-desc").textContent = desc;
     $("#feels-like").textContent = `Feels like ${tempStr(c.apparent_temperature)}`;
+    $("#high-low").textContent = `L: ${tempStr(d.temperature_2m_min[0])}  H: ${tempStr(d.temperature_2m_max[0])}`;
     $("#humidity").textContent = `${c.relative_humidity_2m}%`;
     $("#wind").textContent = speedStr(c.wind_speed_10m);
     $("#wind-dir").textContent = `${degToCompass(c.wind_direction_10m)} (${Math.round(c.wind_direction_10m)}°)`;
@@ -1442,6 +1443,28 @@
     } catch (_) {}
   }
 
+  async function fetchWeatherAlerts(lat, lon) {
+    const alertEl = $("#weather-alert");
+    alertEl.classList.add("hidden");
+    alertEl.innerHTML = "";
+    try {
+      const url = `https://api.weather.gov/alerts/active?point=${lat.toFixed(4)},${lon.toFixed(4)}`;
+      const res = await fetch(url, { headers: { "Accept": "application/geo+json" } });
+      if (!res.ok) return;
+      const data = await res.json();
+      const severe = (data.features || []).filter(f => {
+        const evt = (f.properties.event || "").toLowerCase();
+        return evt.includes("tornado") || evt.includes("severe thunderstorm") || evt.includes("hurricane");
+      });
+      if (severe.length === 0) return;
+      alertEl.innerHTML = severe.map(f => {
+        const p = f.properties;
+        return `<div class="alert-title">⚠️ ${p.event}</div><div class="alert-desc">${p.headline || ""}</div>`;
+      }).join("");
+      alertEl.classList.remove("hidden");
+    } catch (_) {}
+  }
+
   // ── Drag-and-drop for detail cards ──
   function setupDetailDrag() {
     const grid = $(".current-details");
@@ -1456,6 +1479,11 @@
         saved.forEach(id => { if (idMap[id]) grid.appendChild(idMap[id]); });
       }
     } catch (_) {}
+
+    function saveDetailOrder() {
+      const order = [...grid.querySelectorAll(".detail-card")].map(c => c.querySelector(".detail-value").id);
+      try { localStorage.setItem("detail_order", JSON.stringify(order)); } catch (_) {}
+    }
 
     let dragEl = null;
 
@@ -1472,9 +1500,7 @@
         card.classList.remove("dragging");
         grid.querySelectorAll(".detail-card").forEach(c => c.classList.remove("drag-over"));
         dragEl = null;
-        // Save order
-        const order = [...grid.querySelectorAll(".detail-card")].map(c => c.querySelector(".detail-value").id);
-        try { localStorage.setItem("detail_order", JSON.stringify(order)); } catch (_) {}
+        saveDetailOrder();
       });
 
       card.addEventListener("dragover", (e) => {
@@ -1500,6 +1526,48 @@
             grid.insertBefore(dragEl, card);
           }
         }
+      });
+
+      // Touch support
+      let touchTimeout = null;
+      card.addEventListener("touchstart", (e) => {
+        touchTimeout = setTimeout(() => {
+          dragEl = card;
+          card.classList.add("dragging");
+        }, 300);
+      }, { passive: true });
+
+      card.addEventListener("touchmove", (e) => {
+        if (touchTimeout) { clearTimeout(touchTimeout); touchTimeout = null; }
+        if (!dragEl || dragEl !== card) return;
+        e.preventDefault();
+        const touch = e.touches[0];
+        const target = document.elementFromPoint(touch.clientX, touch.clientY);
+        const overCard = target ? target.closest(".detail-card") : null;
+        grid.querySelectorAll(".detail-card").forEach(c => c.classList.remove("drag-over"));
+        if (overCard && overCard !== dragEl) overCard.classList.add("drag-over");
+      }, { passive: false });
+
+      card.addEventListener("touchend", (e) => {
+        if (touchTimeout) { clearTimeout(touchTimeout); touchTimeout = null; }
+        if (!dragEl) return;
+        const touch = e.changedTouches[0];
+        const target = document.elementFromPoint(touch.clientX, touch.clientY);
+        const overCard = target ? target.closest(".detail-card") : null;
+        if (overCard && overCard !== dragEl) {
+          const allCards = [...grid.querySelectorAll(".detail-card")];
+          const fromIdx = allCards.indexOf(dragEl);
+          const toIdx = allCards.indexOf(overCard);
+          if (fromIdx < toIdx) {
+            grid.insertBefore(dragEl, overCard.nextSibling);
+          } else {
+            grid.insertBefore(dragEl, overCard);
+          }
+        }
+        grid.querySelectorAll(".detail-card").forEach(c => c.classList.remove("drag-over"));
+        dragEl.classList.remove("dragging");
+        dragEl = null;
+        saveDetailOrder();
       });
     });
   }
@@ -1669,10 +1737,21 @@
   }
 
   async function fetchSunScore(lat, lon, date, type) {
+    const cacheKey = `sunscore_${lat.toFixed(2)}_${lon.toFixed(2)}_${date}_${type}`;
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed._cacheDate === date) return parsed;
+        localStorage.removeItem(cacheKey);
+      }
+    } catch (_) {}
     const url = `https://api.sunsethue.com/event?latitude=${lat}&longitude=${lon}&date=${date}&type=${type}&key=${encodeURIComponent(SUNSETHUE_API_KEY)}`;
     const res = await fetch(url);
     if (!res.ok) return null;
-    return res.json();
+    const json = await res.json();
+    try { json._cacheDate = date; localStorage.setItem(cacheKey, JSON.stringify(json)); } catch (_) {}
+    return json;
   }
 
   async function renderSunScore(data) {
@@ -1830,6 +1909,15 @@
     return { rise, set };
   }
 
+  function getNextMoonEvent(fromDate, targetAge, synodic) {
+    const refNew = new Date(Date.UTC(2000, 0, 6, 18, 14, 0));
+    const daysSince = (fromDate.getTime() - refNew.getTime()) / 86400000;
+    const currentAge = ((daysSince % synodic) + synodic) % synodic;
+    let daysUntil = targetAge - currentAge;
+    if (daysUntil <= 0) daysUntil += synodic;
+    return new Date(fromDate.getTime() + daysUntil * 86400000);
+  }
+
   function renderMoonPhase(data) {
     const today = new Date(data.daily.time[0] + "T12:00:00");
     const moon = getMoonPhase(today);
@@ -1841,6 +1929,19 @@
     const rs = getMoonRiseSet(today, data.latitude, data.longitude);
     $("#moonrise").textContent = rs.rise ? formatTime(rs.rise.toISOString(), tz) : "—";
     $("#moonset").textContent = rs.set ? formatTime(rs.set.toISOString(), tz) : "—";
+
+    const synodic = 29.53058770576;
+    const nextNew = getNextMoonEvent(today, 0, synodic);
+    const nextFull = getNextMoonEvent(today, synodic / 2, synodic);
+    const dateFmt = { month: "short", day: "numeric" };
+    function moonDateLabel(d) {
+      const diff = Math.round((d.getTime() - today.getTime()) / 86400000);
+      if (diff <= 0) return "Today";
+      if (diff === 1) return "Tomorrow";
+      return d.toLocaleDateString(undefined, dateFmt);
+    }
+    $("#next-new-moon").textContent = moonDateLabel(nextNew);
+    $("#next-full-moon").textContent = moonDateLabel(nextFull);
 
     // Show timezone abbreviation
     try {
@@ -2254,6 +2355,7 @@
     renderDaily(data, forecastDays);
     renderAttire(data);
     renderZodiac(data);
+    fetchWeatherAlerts(data.latitude, data.longitude);
   }
 
   // ── Fetch and render for coordinates ──
@@ -2495,6 +2597,7 @@
     [-17.7134, 178.065, "Suva, Fiji"],
     // Easter egg
     [39.4087, -79.4072, "Swallow Falls, Maryland, USA"],
+    [38.8816, -77.0910, "Arlington, VA, USA"],
   ];
   let lastRandomIdx = -1;
   function triggerRandomCity() {
@@ -2617,15 +2720,20 @@
 
     let dragSection = null;
 
+    function saveSectionOrder() {
+      const order = [...container.querySelectorAll("section.glass")]
+        .map(s => s.id)
+        .filter(id => sectionIds.includes(id));
+      try { localStorage.setItem("section_order", JSON.stringify(order)); } catch (_) {}
+    }
+
     sections.forEach(sec => {
       const handle = sec.querySelector(".section-drag-handle");
       if (!handle) return;
       sec.draggable = false; // only drag via handle
 
       handle.addEventListener("mousedown", () => { sec.draggable = true; });
-      handle.addEventListener("touchstart", () => { sec.draggable = true; }, { passive: true });
       document.addEventListener("mouseup", () => { sec.draggable = false; });
-      document.addEventListener("touchend", () => { sec.draggable = false; });
 
       sec.addEventListener("dragstart", (e) => {
         dragSection = sec;
@@ -2638,11 +2746,7 @@
         sections.forEach(s => s.classList.remove("section-drag-over"));
         dragSection = null;
         sec.draggable = false;
-        // Save order
-        const order = [...container.querySelectorAll("section.glass")]
-          .map(s => s.id)
-          .filter(id => sectionIds.includes(id));
-        try { localStorage.setItem("section_order", JSON.stringify(order)); } catch (_) {}
+        saveSectionOrder();
       });
 
       sec.addEventListener("dragover", (e) => {
@@ -2668,6 +2772,50 @@
             sec.parentNode.insertBefore(dragSection, sec);
           }
         }
+      });
+
+      // Touch support for section handle
+      let touchActive = false;
+      handle.addEventListener("touchstart", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dragSection = sec;
+        sec.classList.add("section-dragging");
+        touchActive = true;
+      });
+
+      handle.addEventListener("touchmove", (e) => {
+        if (!touchActive || dragSection !== sec) return;
+        e.preventDefault();
+        const touch = e.touches[0];
+        const target = document.elementFromPoint(touch.clientX, touch.clientY);
+        const overSec = target ? target.closest("section.glass") : null;
+        sections.forEach(s => s.classList.remove("section-drag-over"));
+        if (overSec && sectionIds.includes(overSec.id) && overSec !== dragSection) {
+          overSec.classList.add("section-drag-over");
+        }
+      }, { passive: false });
+
+      handle.addEventListener("touchend", (e) => {
+        if (!touchActive || dragSection !== sec) return;
+        touchActive = false;
+        const touch = e.changedTouches[0];
+        const target = document.elementFromPoint(touch.clientX, touch.clientY);
+        const overSec = target ? target.closest("section.glass") : null;
+        if (overSec && sectionIds.includes(overSec.id) && overSec !== dragSection) {
+          const allSections = [...container.querySelectorAll("section.glass")].filter(s => sectionIds.includes(s.id));
+          const fromIdx = allSections.indexOf(dragSection);
+          const toIdx = allSections.indexOf(overSec);
+          if (fromIdx < toIdx) {
+            overSec.after(dragSection);
+          } else {
+            container.insertBefore(dragSection, overSec);
+          }
+        }
+        sections.forEach(s => s.classList.remove("section-drag-over"));
+        sec.classList.remove("section-dragging");
+        dragSection = null;
+        saveSectionOrder();
       });
     });
   })();

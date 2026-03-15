@@ -7,8 +7,8 @@
   --surface2: #233345;
   --accent: #ffffff;
   --accent2: #f0c8a0;
-  --text: #e0e6ed;
-  --text-dim: #8899aa;
+  --text: #fce4ec;
+  --text-dim: #ffffff;
   --radius: 12px;
   --shadow: 0 4px 20px rgba(0,0,0,0.3);
 }
@@ -59,7 +59,7 @@ header {
 }
 
 header h1 {
-  font-size: 1.5rem;
+  font-size: 1.2rem;
   color: var(--accent);
   margin-right: auto;
 }
@@ -174,7 +174,7 @@ header h1 {
 .location-info { margin-bottom: 16px; }
 .location-info h2 { font-size: 1.6rem; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .local-time { font-size: 0.95rem; font-weight: 400; color: var(--accent); }
-.location-info p { color: var(--text-dim); font-size: 0.9rem; margin-top: 2px; }
+.location-info p { color: var(--text-dim); font-size: 0.95rem; margin-top: 2px; }
 .greeting { font-size: 1.8rem; font-weight: 700; color: var(--text); text-align: center; margin-bottom: 8px; }
 
 .current-main {
@@ -183,10 +183,30 @@ header h1 {
 }
 .current-temp-block { display: flex; align-items: center; justify-content: center; gap: 12px; }
 .weather-icon-lg { font-size: 3.5rem; }
-.big-temp { font-size: 4rem; font-weight: 700; cursor: pointer; }
+.big-temp { font-size: 4rem; font-weight: 700; cursor: pointer; color: #ffffff; }
 .big-temp:hover { opacity: 0.8; }
-#weather-desc { font-size: 1.1rem; color: var(--text-dim); margin-top: 4px; text-transform: capitalize; }
-#feels-like { font-size: 0.85rem; color: var(--text-dim); margin-top: 2px; }
+#weather-desc { font-size: 1.15rem; color: var(--text-dim); margin-top: 4px; text-transform: capitalize; }
+#feels-like { font-size: 0.92rem; color: var(--text-dim); margin-top: 2px; }
+#high-low { font-size: 0.92rem; color: var(--text-dim); margin-top: 2px; }
+
+#weather-alert {
+  background: rgba(200, 30, 30, 0.85);
+  color: #fff;
+  padding: 12px 18px;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  text-align: center;
+  backdrop-filter: blur(8px);
+  animation: alertPulse 2s ease-in-out infinite;
+}
+#weather-alert .alert-title { font-size: 1.1rem; margin-bottom: 4px; }
+#weather-alert .alert-desc { font-weight: 400; font-size: 0.92rem; opacity: 0.9; }
+@keyframes alertPulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(255, 60, 60, 0.4); }
+  50% { box-shadow: 0 0 20px rgba(255, 60, 60, 0.8); }
+}
 
 .current-details {
   display: grid;
@@ -205,7 +225,7 @@ header h1 {
 .detail-card:active { cursor: grabbing; }
 .detail-card.dragging { opacity: 0.4; transform: scale(0.95); }
 .detail-card.drag-over { box-shadow: 0 0 0 2px var(--accent2); transform: scale(1.03); }
-.detail-label { display: block; font-size: 0.75rem; color: var(--text-dim); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+.detail-label { display: block; font-size: 0.82rem; color: var(--text-dim); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
 .detail-value { font-size: 1.15rem; font-weight: 600; }
 
 /* ── Sun Times ── */
@@ -382,7 +402,7 @@ header h1 {
   font-size: 0.9rem;
 }
 .daily-row:last-child { border-bottom: none; }
-.daily-day { font-weight: 600; }
+.daily-day { font-weight: 600; color: #ffffff; }
 .daily-icon { font-size: 1.4rem; text-align: center; }
 .daily-bar-wrap { height: 6px; background: rgba(255,255,255,0.3); border-radius: 3px; position: relative; overflow: hidden; }
 .daily-bar { position: absolute; height: 100%; border-radius: 3px; }
@@ -402,7 +422,7 @@ header h1 {
 .attire-content { display: flex; flex-direction: column; gap: 12px; }
 .attire-item { display: flex; align-items: center; gap: 12px; font-size: 0.95rem; }
 .attire-icon { font-size: 1.6rem; flex-shrink: 0; width: 36px; text-align: center; }
-.attire-text { line-height: 1.4; }
+.attire-text { line-height: 1.4; color: #ffffff; }
 .attire-text strong { font-weight: 600; }
 
 /* ── Chinese Zodiac ── */

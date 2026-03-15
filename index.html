@@ -12,7 +12,7 @@
   <div id="app">
     <!-- Search Bar -->
     <header>
-      <h1>&#9788; Weather</h1>
+      <h1>🌸 CutieWeather</h1>
       <div id="search-bar">
         <input type="text" id="city-input" placeholder="Search city..." autocomplete="off">
         <button id="search-btn">Search</button>
@@ -25,6 +25,9 @@
     <!-- Loading / Error -->
     <div id="loading" class="hidden"><div class="spinner"></div></div>
     <div id="error" class="hidden"></div>
+
+    <!-- Weather Alerts -->
+    <div id="weather-alert" class="hidden"></div>
 
     <!-- Current Weather -->
     <section id="current-weather" class="hidden glass">
@@ -40,6 +43,7 @@
         </div>
         <p id="weather-desc"></p>
         <p id="feels-like"></p>
+        <p id="high-low"></p>
       </div>
       <div class="current-details">
         <div class="detail-card">
@@ -147,6 +151,14 @@
           <div class="sun-card">
             <span class="sun-label">Moonset</span>
             <span id="moonset" class="sun-value"></span>
+          </div>
+          <div class="sun-card">
+            <span class="sun-label">🌑 New Moon</span>
+            <span id="next-new-moon" class="sun-value"></span>
+          </div>
+          <div class="sun-card">
+            <span class="sun-label">🌕 Full Moon</span>
+            <span id="next-full-moon" class="sun-value"></span>
           </div>
         </div>
       </div>

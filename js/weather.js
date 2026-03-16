@@ -1615,6 +1615,7 @@
         "precipitation_probability",
         "precipitation",
         "weather_code",
+        "wind_speed_10m",
       ].join(","),
       daily: [
         "weather_code",
@@ -1655,9 +1656,10 @@
     // Determine if it's currently nighttime at this location
     const tz = data.timezone;
     let isNight = false;
+    let localHour = new Date().getHours();
     try {
       const now = new Date();
-      const localHour = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(now), 10);
+      localHour = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(now), 10);
       const srH = parseInt(d.sunrise[0].slice(11, 13), 10);
       const ssH = parseInt(d.sunset[0].slice(11, 13), 10);
       isNight = localHour < srH || localHour >= ssH;
@@ -1804,11 +1806,11 @@
     setupDetailDrag();
 
     // Update star mascot
-    updateStarMascot(c.weather_code, c.apparent_temperature, c.wind_speed_10m, isNight);
+    updateStarMascot(c.weather_code, c.apparent_temperature, c.wind_speed_10m, isNight, localHour);
   }
 
   // ── Star Mascot ──
-  function updateStarMascot(code, apparentC, windKmh, isNight) {
+  function updateStarMascot(code, apparentC, windKmh, isNight, hour) {
     const el = $("#star-mascot");
     const faceEl = $("#mascot-face");
     const speechEl = $("#mascot-speech");
@@ -1841,10 +1843,14 @@
       face = "꒡⌓꒡";
       speech = "so mysterious~";
       anim = "sleepy";
-    } else if (isNight) {
+    } else if (isNight && (hour >= 22 || hour < 6)) {
       face = "ᵕ‿ᵕ";
       speech = "sleepy time~ zzz";
       anim = "sleepy";
+    } else if (isNight) {
+      face = "ᵔ‿ᵔ";
+      speech = "cozy evening~!";
+      anim = "sway";
     } else if (feelsF <= 32) {
       face = "꒦ິ꒳꒦ິ";
       speech = "so c-cold~!";
@@ -1878,6 +1884,18 @@
     el.classList.add(anim);
     el.classList.add("visible");
 
+    // Hover blush
+    el.onmouseenter = () => {
+      el._savedFace = faceEl.textContent;
+      el._savedSpeech = speechEl.textContent;
+      faceEl.textContent = ">////<";
+      speechEl.textContent = "kyaa~! \u2764";
+    };
+    el.onmouseleave = () => {
+      if (el._savedFace) faceEl.textContent = el._savedFace;
+      if (el._savedSpeech) speechEl.textContent = el._savedSpeech;
+    };
+
     // Click to cartwheel
     el.onclick = () => {
       el.classList.add("cartwheel");
@@ -1910,6 +1928,98 @@
     } catch (_) {}
   }
 
+  // ── Forecast-based Severe Weather Outlook ──
+  function checkSevereOutlook(data) {
+    const outlookEl = $("#weather-outlook");
+    outlookEl.classList.add("hidden");
+    outlookEl.innerHTML = "";
+
+    const h = data.hourly;
+    if (!h || !h.time) return;
+
+    const now = new Date();
+    const warnings = [];
+
+    // Scan next 48 hours
+    for (let i = 0; i < h.time.length && i < 48; i++) {
+      const t = new Date(h.time[i]);
+      if (t <= now) continue;
+
+      const code = h.weather_code[i];
+      const wind = h.wind_speed_10m ? h.wind_speed_10m[i] : 0;
+      const precip = h.precipitation[i];
+      const hoursAway = Math.round((t - now) / 3600000);
+
+      const dayLabel = hoursAway <= 12 ? "later today" :
+                       hoursAway <= 24 ? "tomorrow" : "in the next 2 days";
+      const timeStr = t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+      // Thunderstorm codes: 95 = thunderstorm, 96 = thunderstorm + hail, 99 = severe thunderstorm + hail
+      if (code === 99 && !warnings.find(w => w.type === "severe-storm")) {
+        warnings.push({ type: "severe-storm", severity: 3,
+          title: "\u26A1 Severe Storms + Hail Expected",
+          desc: `Heavy thunderstorms with hail forecasted ${dayLabel} around ${timeStr}. Stay safe & have a plan!` });
+      } else if (code === 96 && !warnings.find(w => w.type === "storm-hail")) {
+        warnings.push({ type: "storm-hail", severity: 2,
+          title: "\u26A1 Thunderstorms & Hail Ahead",
+          desc: `Thunderstorms with hail expected ${dayLabel} around ${timeStr}. Keep an eye on the sky!` });
+      } else if (code === 95 && !warnings.find(w => w.type === "thunderstorm")) {
+        warnings.push({ type: "thunderstorm", severity: 1,
+          title: "\u26A8\uFE0F Thunderstorms Ahead",
+          desc: `Thunderstorms forecasted ${dayLabel} around ${timeStr}.` });
+      }
+
+      // Extreme wind (>40 km/h = ~25 mph)
+      if (wind >= 40 && !warnings.find(w => w.type === "high-wind")) {
+        const label = wind >= 60 ? "Dangerous" : "Strong";
+        const sev = wind >= 60 ? 2 : 1;
+        warnings.push({ type: "high-wind", severity: sev,
+          title: `\uD83D\uDCA8 ${label} Winds Expected`,
+          desc: `Wind speeds up to ${Math.round(wind)} km/h (${Math.round(wind * 0.621)} mph) expected ${dayLabel} around ${timeStr}.` });
+      }
+
+      // Heavy precipitation (>5mm/hr)
+      if (precip >= 5 && !warnings.find(w => w.type === "heavy-precip")) {
+        const label = precip >= 10 ? "Heavy" : "Significant";
+        const sev = precip >= 10 ? 2 : 1;
+        warnings.push({ type: "heavy-precip", severity: sev,
+          title: `\uD83C\uDF27\uFE0F ${label} Precipitation Expected`,
+          desc: `Up to ${precip.toFixed(1)}mm/hr expected ${dayLabel} around ${timeStr}. Possible flooding risk.` });
+      }
+    }
+
+    // Also check daily data for dangerous combos
+    const d = data.daily;
+    if (d && d.wind_speed_10m_max) {
+      for (let i = 0; i < d.time.length && i < 3; i++) {
+        const dt = new Date(d.time[i]);
+        if (dt.toDateString() === now.toDateString()) continue; // skip today
+        const dCode = d.weather_code[i];
+        const dWind = d.wind_speed_10m_max[i];
+        const dPrecip = d.precipitation_sum[i];
+        const dayName = dt.toLocaleDateString([], { weekday: "long" });
+
+        // Thunderstorm + high wind combo = possible severe/tornado risk
+        if ([95, 96, 99].includes(dCode) && dWind >= 50 && !warnings.find(w => w.type === "combo-severe")) {
+          warnings.push({ type: "combo-severe", severity: 3,
+            title: "\u26A0\uFE0F Severe Weather Risk on " + dayName,
+            desc: `Thunderstorms + high winds (${Math.round(dWind)} km/h / ${Math.round(dWind * 0.621)} mph) and ${dPrecip.toFixed(1)}mm of rain. Conditions may support severe storms. Have a safety plan ready!` });
+        }
+      }
+    }
+
+    if (warnings.length === 0) return;
+
+    // Sort by severity (highest first)
+    warnings.sort((a, b) => b.severity - a.severity);
+
+    outlookEl.innerHTML = warnings.map(w =>
+      `<div class="outlook-title">${w.title}</div><div class="outlook-desc">${w.desc}</div>`
+    ).join("");
+    outlookEl.classList.remove("hidden");
+  }
+
+  // ── NWS Weather Alerts ──
   async function fetchWeatherAlerts(lat, lon) {
     const alertEl = $("#weather-alert");
     alertEl.classList.add("hidden");
@@ -1921,12 +2031,15 @@
       const data = await res.json();
       const severe = (data.features || []).filter(f => {
         const evt = (f.properties.event || "").toLowerCase();
-        return evt.includes("tornado") || evt.includes("severe thunderstorm") || evt.includes("hurricane");
+        return evt.includes("tornado") || evt.includes("severe thunderstorm") ||
+               evt.includes("hurricane") || evt.includes("severe weather") ||
+               evt.includes("extreme wind") || evt.includes("flash flood") ||
+               evt.includes("flood warning") || evt.includes("high wind");
       });
       if (severe.length === 0) return;
       alertEl.innerHTML = severe.map(f => {
         const p = f.properties;
-        return `<div class="alert-title">⚠️ ${p.event}</div><div class="alert-desc">${p.headline || ""}</div>`;
+        return `<div class="alert-title">\u26A0\uFE0F ${p.event}</div><div class="alert-desc">${p.headline || ""}</div>`;
       }).join("");
       alertEl.classList.remove("hidden");
     } catch (_) {}
@@ -2668,6 +2781,7 @@
       `Today's branch: <strong>${fortune.dayAnimal.emoji} ${dayName}</strong> day`;
 
     let html = "";
+    const thisYear = today.getFullYear();
     for (let i = 0; i < 12; i++) {
       const a = ZODIAC_ANIMALS[i];
       const isDay = i === fortune.dayBranch;
@@ -2678,13 +2792,52 @@
       if (isDay) { label = "Day Sign"; cls = " day-sign"; }
       else if (isLucky) { label = "★ Lucky"; cls = " lucky"; }
       else if (isClash) { label = "⚠ Clash"; cls = " clash"; }
-      html += `<div class="zodiac-card${cls}">
+
+      // Compute recent years for this animal
+      const years = [];
+      for (let y = thisYear; years.length < 6; y--) {
+        if ((y - 4) % 12 === i) years.push(y);
+      }
+
+      html += `<div class="zodiac-card${cls}" data-branch="${i}">
         <span class="zodiac-emoji">${a.emoji}</span>
         <span class="zodiac-name">${a.name}</span>
         ${label ? `<span class="zodiac-luck">${label}</span>` : ""}
+        <span class="zodiac-years">${years.join(", ")}</span>
       </div>`;
     }
     $("#zodiac-lucky").innerHTML = html;
+
+    // Click to show years tooltip
+    let activeZodiacCard = null;
+    $("#zodiac-lucky").querySelectorAll(".zodiac-card").forEach(card => {
+      card.addEventListener("click", () => {
+        const tooltip = $("#zodiac-tooltip");
+        if (activeZodiacCard === card) {
+          tooltip.classList.remove("visible");
+          activeZodiacCard = null;
+          return;
+        }
+        activeZodiacCard = card;
+        tooltip.textContent = card.querySelector(".zodiac-years").textContent;
+        tooltip.classList.add("visible");
+        const rect = card.getBoundingClientRect();
+        const tw = tooltip.offsetWidth;
+        let left = rect.left + rect.width / 2 - tw / 2;
+        left = Math.max(8, Math.min(left, window.innerWidth - tw - 8));
+        tooltip.style.left = left + "px";
+        tooltip.style.top = (rect.top - tooltip.offsetHeight - 8) + "px";
+      });
+    });
+
+    // Dismiss tooltip on outside click
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".zodiac-card")) {
+        const tooltip = $("#zodiac-tooltip");
+        if (tooltip) { tooltip.classList.remove("visible"); activeZodiacCard = null; }
+      }
+    }, { capture: true });
+
     show($("#zodiac-section"));
   }
 
@@ -2831,6 +2984,7 @@
     renderDaily(data, forecastDays);
     renderAttire(data);
     renderZodiac(data);
+    checkSevereOutlook(data);
     fetchWeatherAlerts(data.latitude, data.longitude);
   }
 
@@ -3435,9 +3589,22 @@
     }
   }
   document.addEventListener("click", (e) => spawnClickSparkles(e.clientX, e.clientY));
+  let _tapStart = null;
   document.addEventListener("touchstart", (e) => {
     const t = e.touches[0];
-    if (t) spawnClickSparkles(t.clientX, t.clientY);
+    if (t) _tapStart = { x: t.clientX, y: t.clientY, time: Date.now() };
+  }, { passive: true });
+  document.addEventListener("touchend", (e) => {
+    if (!_tapStart) return;
+    const t = e.changedTouches[0];
+    if (!t) { _tapStart = null; return; }
+    const dx = t.clientX - _tapStart.x;
+    const dy = t.clientY - _tapStart.y;
+    const dt = Date.now() - _tapStart.time;
+    if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && dt < 300) {
+      spawnClickSparkles(t.clientX, t.clientY);
+    }
+    _tapStart = null;
   }, { passive: true });
 
   (function animateSparkles() {

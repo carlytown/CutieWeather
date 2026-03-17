@@ -514,6 +514,7 @@ header h1 {
 .attire-icon { font-size: 1.6rem; flex-shrink: 0; width: 36px; text-align: center; }
 .attire-text { line-height: 1.4; color: #ffffff; }
 .attire-text strong { font-weight: 600; }
+.kao { white-space: nowrap; }
 
 /* ── Chinese Zodiac ── */
 #zodiac-section {
@@ -578,6 +579,71 @@ header h1 {
 .zodiac-emoji { font-size: 1.8rem; }
 .zodiac-name { font-size: 0.8rem; font-weight: 600; }
 .zodiac-luck { font-size: 0.7rem; color: var(--text-dim); }
+
+/* ── Plant Care ── */
+#plant-section {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: var(--shadow);
+  margin-bottom: 20px;
+}
+#plant-section h3 { margin-bottom: 16px; font-size: 1.1rem; }
+.plant-content { display: flex; flex-direction: column; gap: 12px; }
+.plant-item { display: flex; align-items: center; gap: 12px; font-size: 0.95rem; }
+.plant-icon { font-size: 1.6rem; flex-shrink: 0; width: 36px; text-align: center; }
+.plant-text { line-height: 1.4; color: #ffffff; }
+.plant-text strong { font-weight: 600; }
+.plant-verdict {
+  margin-top: 4px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(100, 200, 120, 0.15);
+  border: 1px solid rgba(100, 200, 120, 0.25);
+  text-align: center;
+  font-size: 0.95rem;
+}
+.plant-verdict.caution {
+  background: rgba(220, 170, 30, 0.15);
+  border-color: rgba(220, 170, 30, 0.25);
+}
+.plant-verdict.danger {
+  background: rgba(200, 60, 60, 0.15);
+  border-color: rgba(200, 60, 60, 0.25);
+}
+
+/* ── On This Day ── */
+#onthisday-section {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: var(--shadow);
+  margin-bottom: 20px;
+}
+#onthisday-section h3 { margin-bottom: 16px; font-size: 1.1rem; }
+.onthisday-content { display: flex; flex-direction: column; gap: 14px; }
+.otd-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: rgba(220, 160, 180, 0.12);
+}
+.otd-icon { font-size: 1.6rem; flex-shrink: 0; }
+.otd-info { display: flex; flex-direction: column; gap: 2px; }
+.otd-label { font-size: 0.78rem; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+.otd-detail { font-size: 0.95rem; line-height: 1.4; }
+.otd-detail strong { font-weight: 600; }
+.otd-compare {
+  margin-top: 4px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(140, 180, 248, 0.12);
+  border: 1px solid rgba(140, 180, 248, 0.2);
+  text-align: center;
+  font-size: 0.92rem;
+}
 
 /* ── Charts ── */
 #precip-section, #temp-chart-section {
@@ -714,7 +780,7 @@ canvas { width: 100% !important; border-radius: 8px; }
     display: flex;
     flex-direction: column;
     align-items: center;
-    margin: 20px auto 10px;
+    margin: 10px auto 30px;
   }
   .mascot-star { font-size: 4.5rem; }
   .mascot-speech { font-size: 0.85rem; }

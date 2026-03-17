@@ -206,6 +206,8 @@
   let halloweenPreview = false;
   let nightTwinkleMode = false;
   let twinkleStars = [];
+  let shootingStars = [];
+  let shootingStarTimer = null;
   let dayDustMode = false;
   let dustMotes = [];
 
@@ -579,6 +581,9 @@
     // Night twinkle stars
     if (nightTwinkleMode) drawTwinkleStars(fxCtx, W, H);
 
+    // Shooting stars on clear nights
+    if (shootingStars.length > 0) drawShootingStars(fxCtx, W, H);
+
     // Daytime dust motes
     if (dayDustMode) drawDustMotes(fxCtx, W, H);
 
@@ -710,6 +715,8 @@
   let rainGainNode = null;
   let rainFilterNode = null;
   let rainHighFilter = null;
+  let rainLowRumbleSource = null;
+  let rainLowRumbleGain = null;
 
   let rainDropInterval = null;
 
@@ -719,15 +726,19 @@
       const ctx = rainAudioCtx;
       if (ctx.state === "suspended") ctx.resume();
 
-      // If already playing, just adjust volume
+      // If already playing, just adjust volume and filters
       if (rainNoiseSource) {
-        const vol = 0.01 + intensity * 0.04;
+        const vol = 0.015 + intensity * 0.06;
         rainGainNode.gain.linearRampToValueAtTime(vol, ctx.currentTime + 0.5);
-        rainFilterNode.frequency.linearRampToValueAtTime(400 + intensity * 1000, ctx.currentTime + 0.5);
+        rainFilterNode.frequency.linearRampToValueAtTime(500 + intensity * 2500, ctx.currentTime + 0.5);
+        rainHighFilter.frequency.linearRampToValueAtTime(80 + (1 - intensity) * 200, ctx.currentTime + 0.5);
+        if (rainLowRumbleGain) {
+          rainLowRumbleGain.gain.linearRampToValueAtTime(intensity * 0.04, ctx.currentTime + 0.5);
+        }
         return;
       }
 
-      // ── Layer 1: Soft pink noise bed ──
+      // ── Layer 1: Soft pink noise bed (wider frequency range) ──
       const sampleRate = ctx.sampleRate;
       const bufferLen = sampleRate * 2;
       const buffer = ctx.createBuffer(2, bufferLen, sampleRate);
@@ -753,16 +764,16 @@
 
       rainFilterNode = ctx.createBiquadFilter();
       rainFilterNode.type = "lowpass";
-      rainFilterNode.frequency.value = 400 + intensity * 1000;
-      rainFilterNode.Q.value = 0.5;
+      rainFilterNode.frequency.value = 500 + intensity * 2500;
+      rainFilterNode.Q.value = 0.4;
 
       rainHighFilter = ctx.createBiquadFilter();
       rainHighFilter.type = "highpass";
-      rainHighFilter.frequency.value = 250;
-      rainHighFilter.Q.value = 0.3;
+      rainHighFilter.frequency.value = 80 + (1 - intensity) * 200;
+      rainHighFilter.Q.value = 0.2;
 
       rainGainNode = ctx.createGain();
-      rainGainNode.gain.value = 0.01 + intensity * 0.04;
+      rainGainNode.gain.value = 0.015 + intensity * 0.06;
 
       rainNoiseSource.connect(rainFilterNode);
       rainFilterNode.connect(rainHighFilter);
@@ -770,14 +781,40 @@
       rainGainNode.connect(ctx.destination);
       rainNoiseSource.start();
 
-      // ── Layer 2: Pitter-patter drops (short percussive ticks) ──
+      // ── Layer 2: Low-frequency rumble (heavy rain body) ──
+      const rumbleLen = sampleRate * 2;
+      const rumbleBuf = ctx.createBuffer(2, rumbleLen, sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = rumbleBuf.getChannelData(ch);
+        for (let i = 0; i < rumbleLen; i++) {
+          d[i] = (Math.random() * 2 - 1) * 0.1;
+        }
+      }
+      rainLowRumbleSource = ctx.createBufferSource();
+      rainLowRumbleSource.buffer = rumbleBuf;
+      rainLowRumbleSource.loop = true;
+
+      const rumbleLow = ctx.createBiquadFilter();
+      rumbleLow.type = "lowpass";
+      rumbleLow.frequency.value = 150;
+      rumbleLow.Q.value = 0.5;
+
+      rainLowRumbleGain = ctx.createGain();
+      rainLowRumbleGain.gain.value = intensity * 0.04;
+
+      rainLowRumbleSource.connect(rumbleLow);
+      rumbleLow.connect(rainLowRumbleGain);
+      rainLowRumbleGain.connect(ctx.destination);
+      rainLowRumbleSource.start();
+
+      // ── Layer 3: Pitter-patter drops ──
       startDrops(ctx, intensity);
     } catch (_) { /* audio unavailable */ }
   }
 
   function startDrops(ctx, intensity) {
     stopDrops();
-    const dropRate = Math.floor(400 - intensity * 340); // light=400ms, heavy=60ms between drops
+    const dropRate = Math.floor(600 - intensity * 400); // light=600ms, heavy=200ms between drops
     rainDropInterval = setInterval(() => {
       if (ctx.state !== "running") return;
       playDrop(ctx, intensity);
@@ -787,29 +824,26 @@
   function playDrop(ctx, intensity) {
     try {
       const now = ctx.currentTime;
-      // Short burst of noise shaped as a raindrop "tick"
-      const dropLen = 0.01 + Math.random() * 0.02;
+      const dropLen = 0.01 + Math.random() * 0.025;
       const samples = Math.floor(dropLen * ctx.sampleRate);
       const buf = ctx.createBuffer(1, samples, ctx.sampleRate);
       const d = buf.getChannelData(0);
       for (let i = 0; i < samples; i++) {
-        // Exponential decay envelope baked in
-        d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (samples * 0.2));
+        d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (samples * 0.15));
       }
       const src = ctx.createBufferSource();
       src.buffer = buf;
 
-      // Bandpass to give each drop a "tink" character
+      // Wider bandpass range for richer, more varied drops
       const bp = ctx.createBiquadFilter();
       bp.type = "bandpass";
-      bp.frequency.value = 2000 + Math.random() * 4000;
-      bp.Q.value = 1 + Math.random() * 2;
+      bp.frequency.value = 1200 + Math.random() * 6000;
+      bp.Q.value = 0.8 + Math.random() * 1.5;
 
       const g = ctx.createGain();
-      g.gain.setValueAtTime(0.02 + intensity * 0.08 + Math.random() * 0.03, now);
+      g.gain.setValueAtTime(0.01 + intensity * 0.04 + Math.random() * 0.02, now);
       g.gain.exponentialRampToValueAtTime(0.001, now + dropLen + 0.02);
 
-      // Random panning for spatial effect
       const pan = ctx.createStereoPanner();
       pan.pan.value = Math.random() * 2 - 1;
 
@@ -835,19 +869,30 @@
       try {
         if (rainGainNode && rainAudioCtx) {
           rainGainNode.gain.linearRampToValueAtTime(0, rainAudioCtx.currentTime + 0.5);
+          if (rainLowRumbleGain) {
+            rainLowRumbleGain.gain.linearRampToValueAtTime(0, rainAudioCtx.currentTime + 0.5);
+          }
           setTimeout(() => {
             try { rainNoiseSource.stop(); } catch (_) {}
+            try { if (rainLowRumbleSource) rainLowRumbleSource.stop(); } catch (_) {}
             rainNoiseSource = null;
             rainGainNode = null;
             rainFilterNode = null;
             rainHighFilter = null;
+            rainLowRumbleSource = null;
+            rainLowRumbleGain = null;
           }, 600);
         } else {
           rainNoiseSource.stop();
           rainNoiseSource = null;
+          try { if (rainLowRumbleSource) rainLowRumbleSource.stop(); } catch (_) {}
+          rainLowRumbleSource = null;
+          rainLowRumbleGain = null;
         }
       } catch (_) {
         rainNoiseSource = null;
+        rainLowRumbleSource = null;
+        rainLowRumbleGain = null;
       }
     }
   }
@@ -1294,6 +1339,11 @@
     if (nightTwinkleMode && twinkleStars.length === 0) spawnTwinkleStars();
     if (!nightTwinkleMode) twinkleStars = [];
 
+    // Shooting stars on clear nights (codes 0=clear, 1=mainly clear)
+    const isClearNight = isNightFX && [0, 1].includes(code);
+    if (isClearNight && !shootingStarTimer) startShootingStars();
+    if (!isClearNight) stopShootingStars();
+
     // Daytime dust motes
     dayDustMode = !isNightFX && !fxType;
     if (dayDustMode && dustMotes.length === 0) spawnDustMotes();
@@ -1343,6 +1393,85 @@
         const angle = (i * Math.PI) / spikes - Math.PI / 2;
         const method = i === 0 ? "moveTo" : "lineTo";
         ctx[method](Math.cos(angle) * r, Math.sin(angle) * r);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // ── Shooting Stars ──
+  function spawnOneShootingStar() {
+    const W = fxCanvas.width;
+    const H = fxCanvas.height;
+    const angle = (Math.PI / 12) + Math.random() * (Math.PI / 8); // 15°–37° shallow downward
+    const speed = 3 + Math.random() * 2.5;
+    shootingStars.push({
+      x: Math.random() * W * 0.2,
+      y: Math.random() * H * 0.35,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 0.0,
+      fadeIn: 0.02 + Math.random() * 0.01,
+      decay: 0.004 + Math.random() * 0.003,
+      fadingIn: true,
+      len: 40 + Math.random() * 50,
+    });
+  }
+
+  function startShootingStars() {
+    if (shootingStarTimer) return;
+    spawnOneShootingStar();
+    shootingStarTimer = setInterval(() => {
+      if (shootingStars.length < 2) spawnOneShootingStar();
+    }, 8000 + Math.random() * 10000);
+  }
+
+  function stopShootingStars() {
+    if (shootingStarTimer) { clearInterval(shootingStarTimer); shootingStarTimer = null; }
+    shootingStars = [];
+  }
+
+  function drawShootingStars(ctx, W, H) {
+    for (let i = shootingStars.length - 1; i >= 0; i--) {
+      const s = shootingStars[i];
+      s.x += s.vx;
+      s.y += s.vy;
+      if (s.fadingIn) {
+        s.life += s.fadeIn;
+        if (s.life >= 1.0) { s.life = 1.0; s.fadingIn = false; }
+      } else {
+        s.life -= s.decay;
+      }
+      if (s.life <= 0 || s.x > W + 50 || s.y > H + 50) {
+        shootingStars.splice(i, 1);
+        continue;
+      }
+      const tailX = s.x - (s.vx / Math.hypot(s.vx, s.vy)) * s.len;
+      const tailY = s.y - (s.vy / Math.hypot(s.vx, s.vy)) * s.len;
+      const grad = ctx.createLinearGradient(tailX, tailY, s.x, s.y);
+      grad.addColorStop(0, `rgba(255, 255, 255, 0)`);
+      grad.addColorStop(1, `rgba(255, 255, 255, ${s.life * 0.8})`);
+      ctx.save();
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 1.5;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(tailX, tailY);
+      ctx.lineTo(s.x, s.y);
+      ctx.stroke();
+      // Bright 4-pointed star head (same shape as twinkle stars, bigger)
+      ctx.fillStyle = `rgba(255, 255, 255, ${s.life})`;
+      const headR = 4;
+      const innerR = headR * 0.4;
+      const spikes = 4;
+      ctx.beginPath();
+      for (let j = 0; j < spikes * 2; j++) {
+        const r = j % 2 === 0 ? headR : innerR;
+        const angle = (j * Math.PI) / spikes - Math.PI / 2;
+        const px = s.x + Math.cos(angle) * r;
+        const py = s.y + Math.sin(angle) * r;
+        if (j === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
       }
       ctx.closePath();
       ctx.fill();
@@ -1616,6 +1745,8 @@
         "precipitation",
         "weather_code",
         "wind_speed_10m",
+        "soil_temperature_0cm",
+        "soil_moisture_0_to_1cm",
       ].join(","),
       daily: [
         "weather_code",
@@ -1627,6 +1758,8 @@
         "precipitation_probability_max",
         "uv_index_max",
         "wind_speed_10m_max",
+        "et0_fao_evapotranspiration",
+        "sunshine_duration",
       ].join(","),
       timezone: "auto",
       forecast_days: days,
@@ -2703,8 +2836,11 @@
     }
 
     const container = $("#attire-content");
+    // Wrap trailing kaomoji in nowrap spans so they don't get split across lines
+    const wrapKaomoji = (s) => s.replace(/([\s]*[꒰(]\S[^꒱)]*[꒱)][\S]*)$/g, '<span class="kao">$1</span>')
+                                .replace(/([\s]*[☀₊⊹♡]+)$/g, '<span class="kao">$1</span>');
     container.innerHTML = items.map(i =>
-      `<div class="attire-item"><span class="attire-icon">${i.icon}</span><span class="attire-text">${i.text}</span></div>`
+      `<div class="attire-item"><span class="attire-icon">${i.icon}</span><span class="attire-text">${wrapKaomoji(i.text)}</span></div>`
     ).join("");
     show($("#attire-section"));
   }
@@ -2802,7 +2938,7 @@
       html += `<div class="zodiac-card${cls}" data-branch="${i}">
         <span class="zodiac-emoji">${a.emoji}</span>
         <span class="zodiac-name">${a.name}</span>
-        ${label ? `<span class="zodiac-luck">${label}</span>` : ""}
+        <span class="zodiac-luck">${label || "&nbsp;"}</span>
         <span class="zodiac-years">${years.join(", ")}</span>
       </div>`;
     }
@@ -2839,6 +2975,290 @@
     }, { capture: true });
 
     show($("#zodiac-section"));
+  }
+
+  // ── Plant Care ──
+  function renderPlantCare(data) {
+    const d = data.daily;
+    const h = data.hourly;
+    const items = [];
+
+    // -- Watering needs (ET0 vs precipitation) --
+    const et0Today = d.et0_fao_evapotranspiration ? d.et0_fao_evapotranspiration[0] : null;
+    const precipToday = d.precipitation_sum ? d.precipitation_sum[0] : 0;
+    const precipTomorrow = d.precipitation_sum && d.precipitation_sum[1] ? d.precipitation_sum[1] : 0;
+    const precipProbTomorrow = d.precipitation_probability_max && d.precipitation_probability_max[1] ? d.precipitation_probability_max[1] : 0;
+
+    if (et0Today != null) {
+      const waterNeed = Math.max(0, et0Today - precipToday);
+      if (precipProbTomorrow >= 60 && precipTomorrow >= 3) {
+        items.push({ icon: "💧", text: `<strong>skip watering today~!</strong> rain is expected tomorrow (${precipProbTomorrow}% chance, ~${precipStr(precipTomorrow)}) ꒰ᐢ. .ᐢ꒱` });
+      } else if (waterNeed < 1) {
+        items.push({ icon: "💧", text: `<strong>plants are happy~!</strong> rain covered today's water needs ₊˚⊹` });
+      } else if (waterNeed < 3) {
+        items.push({ icon: "💧", text: `<strong>light watering needed~!</strong> plants need about ${precipStr(waterNeed)} of water today (ᵔᴗᵔ)` });
+      } else if (waterNeed < 5) {
+        items.push({ icon: "💧", text: `<strong>give your plants a good drink~!</strong> they need about ${precipStr(waterNeed)} today ꒰˶ˆ꒳ˆ˶꒱` });
+      } else {
+        items.push({ icon: "💧", text: `<strong>extra thirsty day~!</strong> plants need about ${precipStr(waterNeed)} — water deeply! (⸝⸝˃ ᵕ ˂⸝⸝)` });
+      }
+    }
+
+    // -- Overnight freeze warning --
+    const tonightLow = d.temperature_2m_min ? d.temperature_2m_min[0] : null;
+    const tomorrowLow = d.temperature_2m_min && d.temperature_2m_min[1] ? d.temperature_2m_min[1] : null;
+    const freezeC = 0;
+    if (tonightLow != null && tonightLow <= freezeC) {
+      const tempF = Math.round(tonightLow * 9 / 5 + 32);
+      const tempC = Math.round(tonightLow);
+      const t = unit === "fahrenheit" ? `${tempF}°F` : `${tempC}°C`;
+      items.push({ icon: "🥶", text: `<strong>freeze warning tonight~!</strong> low of ${t} — bring tender plants inside or cover them! ꒰>_<꒱` });
+    } else if (tomorrowLow != null && tomorrowLow <= freezeC) {
+      const tempF = Math.round(tomorrowLow * 9 / 5 + 32);
+      const tempC = Math.round(tomorrowLow);
+      const t = unit === "fahrenheit" ? `${tempF}°F` : `${tempC}°C`;
+      items.push({ icon: "🥶", text: `<strong>freeze expected tomorrow night~!</strong> low of ${t} — plan to protect your plants! ꒰˶ˊᵕˋ˶꒱` });
+    }
+
+    // -- Soil temperature --
+    const now = new Date();
+    let soilTemp = null;
+    if (h && h.soil_temperature_0cm) {
+      // Find current hour index
+      for (let i = 0; i < h.time.length; i++) {
+        if (new Date(h.time[i]) >= now) {
+          soilTemp = h.soil_temperature_0cm[i];
+          break;
+        }
+      }
+    }
+    if (soilTemp != null) {
+      const stF = Math.round(soilTemp * 9 / 5 + 32);
+      const stC = Math.round(soilTemp);
+      const t = unit === "fahrenheit" ? `${stF}°F` : `${stC}°C`;
+      if (soilTemp < 5) {
+        items.push({ icon: "🌡️", text: `<strong>soil temp: ${t} — too cold to plant~!</strong> wait for warmer ground (ˊ·ˋ)` });
+      } else if (soilTemp < 10) {
+        items.push({ icon: "🌡️", text: `<strong>soil temp: ${t} — cool soil~!</strong> ok for cold-hardy crops like lettuce & peas ₊˚⊹` });
+      } else if (soilTemp < 20) {
+        items.push({ icon: "🌡️", text: `<strong>soil temp: ${t} — great for planting~!</strong> most seeds will germinate nicely (ᵔᴗᵔ)♡` });
+      } else {
+        items.push({ icon: "🌡️", text: `<strong>soil temp: ${t} — warm soil~!</strong> perfect for heat-loving plants like tomatoes & peppers ☀` });
+      }
+    }
+
+    // -- Soil moisture --
+    let soilMoisture = null;
+    if (h && h.soil_moisture_0_to_1cm) {
+      for (let i = 0; i < h.time.length; i++) {
+        if (new Date(h.time[i]) >= now) {
+          soilMoisture = h.soil_moisture_0_to_1cm[i];
+          break;
+        }
+      }
+    }
+    if (soilMoisture != null) {
+      const pct = (soilMoisture * 100).toFixed(0);
+      let label, desc;
+      if (soilMoisture < 0.1) {
+        label = "dry";
+        desc = "soil is very dry, definitely water today~!";
+      } else if (soilMoisture < 0.25) {
+        label = "slightly dry";
+        desc = "could use some water soon~";
+      } else if (soilMoisture < 0.4) {
+        label = "moist";
+        desc = "looking good, nice and damp~!";
+      } else {
+        label = "wet";
+        desc = "plenty of moisture, no need to water~!";
+      }
+      items.push({ icon: "🪴", text: `<strong>soil moisture: ${pct}% (${label})~!</strong> ${desc}` });
+    }
+
+    // -- Sunshine hours --
+    const sunSec = d.sunshine_duration ? d.sunshine_duration[0] : null;
+    if (sunSec != null) {
+      const sunHrs = (sunSec / 3600).toFixed(1);
+      if (sunHrs < 2) {
+        items.push({ icon: "☁️", text: `<strong>${sunHrs} hrs of sun today~</strong> mostly cloudy — shade plants will be happy!` });
+      } else if (sunHrs < 6) {
+        items.push({ icon: "⛅", text: `<strong>${sunHrs} hrs of sun today~</strong> good for partial-shade plants ₊˚⊹` });
+      } else {
+        items.push({ icon: "☀️", text: `<strong>${sunHrs} hrs of sun today~!</strong> sun-loving plants are thriving! (◍˃ ᗜ ˂◍)` });
+      }
+    }
+
+    // -- Overall verdict --
+    let verdict, verdictClass;
+    const hasFreeze = (tonightLow != null && tonightLow <= freezeC) || (tomorrowLow != null && tomorrowLow <= freezeC);
+    const highTemp = d.temperature_2m_max ? d.temperature_2m_max[0] : 20;
+    const sunHrs = sunSec ? sunSec / 3600 : 4;
+
+    if (hasFreeze) {
+      verdict = "❄️ protect your plants tonight~! frost is coming ꒰>_<꒱";
+      verdictClass = "danger";
+    } else if (highTemp > 38) {
+      verdict = "🥵 extreme heat~! shade your plants & water deeply in the morning";
+      verdictClass = "caution";
+    } else if (highTemp < 5) {
+      verdict = "🧣 too cold for most outdoor gardening today~ stay cozy inside!";
+      verdictClass = "caution";
+    } else if (sunHrs >= 6 && highTemp >= 15 && highTemp <= 30) {
+      verdict = "🌸 perfect growing day~! your plants are so happy right now ꒰ᐢ. .ᐢ꒱♡";
+      verdictClass = "";
+    } else {
+      verdict = "🌱 decent day for plants~! keep up the good care ₊˚⊹";
+      verdictClass = "";
+    }
+
+    const container = $("#plant-content");
+    const wrapKao = (s) => s.replace(/([\s]*[꒰(]\S[^꒱)]*[꒱)][\S]*)$/g, '<span class="kao">$1</span>')
+                            .replace(/([\s]*[☀₊⊹♡]+)$/g, '<span class="kao">$1</span>');
+    container.innerHTML = items.map(i =>
+      `<div class="plant-item"><span class="plant-icon">${i.icon}</span><span class="plant-text">${wrapKao(i.text)}</span></div>`
+    ).join("") +
+    `<div class="plant-verdict ${verdictClass}">${verdict}</div>`;
+    show($("#plant-section"));
+  }
+
+  // ── On This Day (Historical) ──
+  async function fetchHistorical(lat, lon, startDate, endDate) {
+    const params = new URLSearchParams({
+      latitude: lat,
+      longitude: lon,
+      start_date: startDate,
+      end_date: endDate,
+      daily: ["weather_code", "temperature_2m_max", "temperature_2m_min"].join(","),
+      timezone: "auto",
+    });
+    const url = `https://archive-api.open-meteo.com/v1/archive?${params}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return res.json();
+  }
+
+  async function renderOnThisDay(data) {
+    const container = $("#onthisday-content");
+    container.innerHTML = "";
+    hide($("#onthisday-section"));
+
+    const lat = data.latitude;
+    const lon = data.longitude;
+    const tz = data.timezone;
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()).split("-");
+    const todayYear = +parts[0];
+    const mm = parts[1];
+    const dd = parts[2];
+    const todayHigh = data.daily.temperature_2m_max[0];
+    const todayLow = data.daily.temperature_2m_min[0];
+
+    // Fetch last year
+    const lastYearDate = `${todayYear - 1}-${mm}-${dd}`;
+    // Fetch 10-year average (last 10 years of this date)
+    const avgYears = [];
+    for (let y = todayYear - 1; y >= todayYear - 10; y--) avgYears.push(`${y}-${mm}-${dd}`);
+    const avgStart = avgYears[avgYears.length - 1];
+    const avgEnd = avgYears[0];
+
+    try {
+      const [lastYearData, avgData] = await Promise.all([
+        fetchHistorical(lat, lon, lastYearDate, lastYearDate),
+        fetchHistorical(lat, lon, avgStart, avgEnd),
+      ]);
+
+      let html = "";
+
+      // -- Last year --
+      if (lastYearData && lastYearData.daily && lastYearData.daily.time.length > 0) {
+        const d = lastYearData.daily;
+        // Find the matching date in results
+        const idx = d.time.indexOf(lastYearDate);
+        if (idx !== -1) {
+          const lyHigh = d.temperature_2m_max[idx];
+          const lyLow = d.temperature_2m_min[idx];
+          const lyCode = d.weather_code[idx];
+          const [lyDesc, lyIcon] = weatherInfo(lyCode, false);
+          const diff = todayHigh - lyHigh;
+          const diffStr = Math.abs(Math.round(unit === "fahrenheit" ? diff * 9/5 : diff));
+          const diffLabel = diff > 0 ? `${diffStr}\u00b0 warmer` : diff < 0 ? `${diffStr}\u00b0 cooler` : "the same temp";
+
+          html += `<div class="otd-card">
+            <span class="otd-icon">${lyIcon}</span>
+            <div class="otd-info">
+              <span class="otd-label">this day last year</span>
+              <span class="otd-detail"><strong>${tempStr(lyHigh)}</strong> / ${tempStr(lyLow)} \u00b7 ${lyDesc}</span>
+              <span class="otd-detail" style="font-size:0.85rem;color:var(--text-dim)">today is ${diffLabel} than last year~</span>
+            </div>
+          </div>`;
+        }
+      }
+
+      // -- 10-year average --
+      if (avgData && avgData.daily && avgData.daily.time.length > 0) {
+        const d = avgData.daily;
+        // Filter to only matching month-day across years
+        let totalHigh = 0, totalLow = 0, count = 0;
+        let recordHigh = -Infinity, recordHighYear = "";
+        let recordLow = Infinity, recordLowYear = "";
+        for (let i = 0; i < d.time.length; i++) {
+          if (d.time[i].slice(5) === `${mm}-${dd}`) {
+            const h = d.temperature_2m_max[i];
+            const l = d.temperature_2m_min[i];
+            if (h == null || l == null) continue;
+            totalHigh += h;
+            totalLow += l;
+            count++;
+            if (h > recordHigh) { recordHigh = h; recordHighYear = d.time[i].slice(0, 4); }
+            if (l < recordLow) { recordLow = l; recordLowYear = d.time[i].slice(0, 4); }
+          }
+        }
+        if (count > 0) {
+          const avgHigh = totalHigh / count;
+          const avgLow = totalLow / count;
+          const diff = todayHigh - avgHigh;
+          const diffStr = Math.abs(Math.round(unit === "fahrenheit" ? diff * 9/5 : diff));
+          let compareMsg;
+          if (diff > 5) {
+            compareMsg = `${diffStr}\u00b0 above average~! what a warm treat! \u208a\u02da\u22b9`;
+          } else if (diff > 2) {
+            compareMsg = `${diffStr}\u00b0 above average~ a little warmer than usual!`;
+          } else if (diff < -5) {
+            compareMsg = `${diffStr}\u00b0 below average~! bundle up extra today! (\u02ca\u00b7\u02cb)`;
+          } else if (diff < -2) {
+            compareMsg = `${diffStr}\u00b0 below average~ a bit cooler than normal`;
+          } else {
+            compareMsg = "right around average for today~ perfectly normal! (\u1d54\u1d17\u1d54)";
+          }
+
+          html += `<div class="otd-card">
+            <span class="otd-icon">\u2727</span>
+            <div class="otd-info">
+              <span class="otd-label">10-year average for ${new Date(todayYear, +mm - 1, +dd).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+              <span class="otd-detail"><strong>${tempStr(avgHigh)}</strong> / ${tempStr(avgLow)}</span>
+            </div>
+          </div>`;
+
+          // Records
+          if (count >= 3) {
+            html += `<div class="otd-card">
+              <span class="otd-icon">\u2606</span>
+              <div class="otd-info">
+                <span class="otd-label">10-year records</span>
+                <span class="otd-detail">highest: <strong>${tempStr(recordHigh)}</strong> (${recordHighYear}) \u00b7 lowest: <strong>${tempStr(recordLow)}</strong> (${recordLowYear})</span>
+              </div>
+            </div>`;
+          }
+
+          html += `<div class="otd-compare">${compareMsg}</div>`;
+        }
+      }
+
+      if (html) {
+        container.innerHTML = html;
+        show($("#onthisday-section"));
+      }
+    } catch (_) { /* historical data unavailable */ }
   }
 
   // ── Draw simple canvas chart ──
@@ -2971,7 +3391,7 @@
     // Hide everything first
     [
       "#current-weather", "#sun-times", "#sun-score-section", "#moon-phase", "#hourly-section",
-      "#forecast-section", "#attire-section", "#zodiac-section",
+      "#forecast-section", "#attire-section", "#zodiac-section", "#plant-section", "#onthisday-section",
     ].forEach((s) => hide($(s)));
 
     renderCurrent(data, name);
@@ -2984,6 +3404,8 @@
     renderDaily(data, forecastDays);
     renderAttire(data);
     renderZodiac(data);
+    renderPlantCare(data);
+    renderOnThisDay(data);
     checkSevereOutlook(data);
     fetchWeatherAlerts(data.latitude, data.longitude);
   }
@@ -3157,7 +3579,7 @@
   });
 
   // ── Geolocation ──
-  locateBtn.addEventListener("click", () => {
+  function geolocate() {
     if (!navigator.geolocation) { showError("Geolocation not supported"); return; }
     showLoading();
     navigator.geolocation.getCurrentPosition(
@@ -3169,7 +3591,10 @@
         showError("Location access denied.");
       }
     );
-  });
+  }
+  locateBtn.addEventListener("click", geolocate);
+  $("#logo").addEventListener("click", geolocate);
+  $("#logo").style.cursor = "pointer";
 
   // ── Randomize button ──
   const WORLD_CITIES = [
@@ -3375,7 +3800,7 @@
     const container = $("#app");
     const sectionIds = [
       "sun-times", "sun-score-section", "moon-phase", "hourly-section",
-      "forecast-section", "attire-section", "zodiac-section",
+      "forecast-section", "attire-section", "zodiac-section", "plant-section", "onthisday-section",
     ];
     const sections = sectionIds.map(id => $(`#${id}`)).filter(Boolean);
 
@@ -3618,13 +4043,10 @@
       p.vy += 0.03;
       const alpha = p.life * 0.8;
       const s = p.size * p.life;
-      const r = p.hue < 0.33 ? 255 : p.hue < 0.66 ? 255 : 220;
-      const g = p.hue < 0.33 ? 200 : p.hue < 0.66 ? 230 : 180;
-      const b = p.hue < 0.33 ? 220 : p.hue < 0.66 ? 255 : 255;
       sCtx.save();
       sCtx.translate(p.x, p.y);
       sCtx.globalAlpha = alpha;
-      sCtx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
+      sCtx.strokeStyle = "rgb(255, 255, 255)";
       sCtx.lineWidth = 0.8;
       sCtx.beginPath(); sCtx.moveTo(0, -s); sCtx.lineTo(0, s); sCtx.stroke();
       sCtx.beginPath(); sCtx.moveTo(-s, 0); sCtx.lineTo(s, 0); sCtx.stroke();

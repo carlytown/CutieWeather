@@ -1404,12 +1404,14 @@
   function spawnOneShootingStar() {
     const W = fxCanvas.width;
     const H = fxCanvas.height;
-    const angle = (Math.PI / 12) + Math.random() * (Math.PI / 8); // 15°–37° shallow downward
+    const angle = (Math.PI / 18) + Math.random() * (Math.PI / 4); // 10°–55° varied downward
     const speed = 3 + Math.random() * 2.5;
+    const goRight = Math.random() > 0.25; // 75% left-to-right, 25% right-to-left
+    const dirX = goRight ? 1 : -1;
     shootingStars.push({
-      x: Math.random() * W * 0.2,
-      y: Math.random() * H * 0.35,
-      vx: Math.cos(angle) * speed,
+      x: goRight ? Math.random() * W * 0.3 : W * 0.7 + Math.random() * W * 0.3,
+      y: Math.random() * H * 0.4,
+      vx: Math.cos(angle) * speed * dirX,
       vy: Math.sin(angle) * speed,
       life: 0.0,
       fadeIn: 0.02 + Math.random() * 0.01,
@@ -1637,9 +1639,10 @@
   }
   function precipStr(mm) {
     if (unit === "fahrenheit") {
-      return `${(mm / 25.4).toFixed(2)} in`;
+      const val = Math.round(mm / 25.4);
+      return `${val} ${val === 1 ? "inch" : "inches"}`;
     }
-    return `${mm} mm`;
+    return `${Math.round(mm)} mm`;
   }
 
   // ── Date formatting ──
@@ -2113,11 +2116,16 @@
 
       // Heavy precipitation (>5mm/hr)
       if (precip >= 5 && !warnings.find(w => w.type === "heavy-precip")) {
+        // Sum total precipitation from the forecast period
+        let totalPrecip = 0;
+        for (let j = 0; j < h.time.length && j < 48; j++) {
+          if (new Date(h.time[j]) > now) totalPrecip += (h.precipitation[j] || 0);
+        }
         const label = precip >= 10 ? "Heavy" : "Significant";
         const sev = precip >= 10 ? 2 : 1;
         warnings.push({ type: "heavy-precip", severity: sev,
           title: `\uD83C\uDF27\uFE0F ${label} Precipitation Expected`,
-          desc: `Up to ${precip.toFixed(1)}mm/hr expected ${dayLabel} around ${timeStr}. Possible flooding risk.` });
+          desc: `About ${precipStr(totalPrecip)} of rain expected over the next 48 hours, heaviest ${dayLabel} around ${timeStr}. Possible flooding risk.` });
       }
     }
 
@@ -2136,7 +2144,7 @@
         if ([95, 96, 99].includes(dCode) && dWind >= 50 && !warnings.find(w => w.type === "combo-severe")) {
           warnings.push({ type: "combo-severe", severity: 3,
             title: "\u26A0\uFE0F Severe Weather Risk on " + dayName,
-            desc: `Thunderstorms + high winds (${Math.round(dWind)} km/h / ${Math.round(dWind * 0.621)} mph) and ${dPrecip.toFixed(1)}mm of rain. Conditions may support severe storms. Have a safety plan ready!` });
+            desc: `Thunderstorms + high winds (${Math.round(dWind)} km/h / ${Math.round(dWind * 0.621)} mph) and about ${precipStr(dPrecip)} of rain. Conditions may support severe storms. Have a safety plan ready!` });
         }
       }
     }
@@ -2150,6 +2158,98 @@
       `<div class="outlook-title">${w.title}</div><div class="outlook-desc">${w.desc}</div>`
     ).join("");
     outlookEl.classList.remove("hidden");
+  }
+
+  // ── Comfort Meter ──
+  function renderComfortMeter(data) {
+    const sec = $("#comfort-section");
+    const el = $("#comfort-content");
+    if (!data.current) { sec.classList.add("hidden"); return; }
+
+    const c = data.current;
+    const tempC = c.temperature_2m;
+    const feelsC = c.apparent_temperature;
+    const humidity = c.relative_humidity_2m;
+    const windKmh = c.wind_speed_10m;
+    const uv = c.uv_index || 0;
+
+    // Comfort score (0-100)
+    // Temperature comfort: ideal around 20-24°C
+    let tempScore;
+    if (feelsC >= 18 && feelsC <= 26) tempScore = 100;
+    else if (feelsC >= 14 && feelsC < 18) tempScore = 60 + (feelsC - 14) * 10;
+    else if (feelsC > 26 && feelsC <= 32) tempScore = 100 - (feelsC - 26) * 10;
+    else if (feelsC >= 8 && feelsC < 14) tempScore = 30 + (feelsC - 8) * 5;
+    else if (feelsC > 32 && feelsC <= 38) tempScore = 40 - (feelsC - 32) * 5;
+    else tempScore = Math.max(0, 20 - Math.abs(feelsC - 22) * 2);
+    tempScore = Math.max(0, Math.min(100, tempScore));
+
+    // Humidity comfort: ideal 30-60%
+    let humScore;
+    if (humidity >= 30 && humidity <= 60) humScore = 100;
+    else if (humidity < 30) humScore = 60 + humidity * (40 / 30);
+    else humScore = Math.max(0, 100 - (humidity - 60) * 2.5);
+    humScore = Math.max(0, Math.min(100, humScore));
+
+    // Wind comfort: calm is best
+    let windScore;
+    if (windKmh <= 12) windScore = 100;
+    else if (windKmh <= 30) windScore = 100 - (windKmh - 12) * 3;
+    else windScore = Math.max(0, 46 - (windKmh - 30) * 2);
+    windScore = Math.max(0, Math.min(100, windScore));
+
+    // UV comfort: low is better for being outside
+    let uvScore;
+    if (uv <= 3) uvScore = 100;
+    else if (uv <= 6) uvScore = 100 - (uv - 3) * 15;
+    else uvScore = Math.max(0, 55 - (uv - 6) * 10);
+    uvScore = Math.max(0, Math.min(100, uvScore));
+
+    const score = Math.round(tempScore * 0.45 + humScore * 0.2 + windScore * 0.2 + uvScore * 0.15);
+
+    // Pick face, label, color, description
+    let face, label, color, desc;
+    if (score >= 85) {
+      face = "(ᵔᴗᵔ)"; label = "perfect~!";
+      color = "#8ecda0"; desc = "it's beautiful outside — go enjoy it! ₊˚⊹";
+    } else if (score >= 70) {
+      face = "(◕ᴗ◕)"; label = "really nice~";
+      color = "#a8d8a8"; desc = "lovely weather for a walk or hanging outside~";
+    } else if (score >= 55) {
+      face = "(ᵔ‿ᵔ)"; label = "pretty comfy~";
+      color = "#c8d8a0"; desc = "not bad at all — just dress for it!";
+    } else if (score >= 40) {
+      face = "(・_・)"; label = "a bit iffy~";
+      color = "#e8c878"; desc = "not the coziest, but totally manageable~";
+    } else if (score >= 25) {
+      face = "(；⌣̀_⌣́)"; label = "kinda rough~";
+      color = "#e0a070"; desc = "might want to stay cozy inside today~";
+    } else {
+      face = "(>_<)"; label = "yikes~!";
+      color = "#d88080"; desc = "definitely not comfy out there — be careful!";
+    }
+
+    // Factor tags
+    const factors = [];
+    if (tempScore < 50) factors.push(feelsC < 18 ? "❄️ cold" : "🥵 hot");
+    if (humScore < 50) factors.push(humidity < 30 ? "🏜️ dry" : "💦 humid");
+    if (windScore < 60) factors.push("💨 windy");
+    if (uvScore < 50) factors.push("☀️ high uv");
+    if (factors.length === 0) factors.push("✧ all good");
+
+    el.innerHTML = `
+      <div class="comfort-gauge">
+        <div class="comfort-face">${face}</div>
+        <div class="comfort-bar-track">
+          <div class="comfort-bar-fill" style="width:${score}%;background:${color}"></div>
+        </div>
+        <div style="font-weight:700;min-width:32px;text-align:right">${score}</div>
+      </div>
+      <div class="comfort-label">${label}</div>
+      <div class="comfort-desc">${desc}</div>
+      <div class="comfort-factors">${factors.map(f => `<span class="comfort-tag">${f}</span>`).join("")}</div>
+    `;
+    sec.classList.remove("hidden");
   }
 
   // ── NWS Weather Alerts ──
@@ -2992,15 +3092,15 @@
     if (et0Today != null) {
       const waterNeed = Math.max(0, et0Today - precipToday);
       if (precipProbTomorrow >= 60 && precipTomorrow >= 3) {
-        items.push({ icon: "💧", text: `<strong>skip watering today~!</strong> rain is expected tomorrow (${precipProbTomorrow}% chance, ~${precipStr(precipTomorrow)}) ꒰ᐢ. .ᐢ꒱` });
+        items.push({ icon: "💧", text: `<strong>skip watering today~!</strong> rain is expected tomorrow (${precipProbTomorrow}% chance) ꒰ᐢ. .ᐢ꒱` });
       } else if (waterNeed < 1) {
         items.push({ icon: "💧", text: `<strong>plants are happy~!</strong> rain covered today's water needs ₊˚⊹` });
       } else if (waterNeed < 3) {
-        items.push({ icon: "💧", text: `<strong>light watering needed~!</strong> plants need about ${precipStr(waterNeed)} of water today (ᵔᴗᵔ)` });
+        items.push({ icon: "💧", text: `<strong>light watering needed~!</strong> a quick sprinkle will do (ᵔᴗᵔ)` });
       } else if (waterNeed < 5) {
-        items.push({ icon: "💧", text: `<strong>give your plants a good drink~!</strong> they need about ${precipStr(waterNeed)} today ꒰˶ˆ꒳ˆ˶꒱` });
+        items.push({ icon: "💧", text: `<strong>medium watering needed~!</strong> give your plants a good drink today ꒰˶ˆ꒳ˆ˶꒱` });
       } else {
-        items.push({ icon: "💧", text: `<strong>extra thirsty day~!</strong> plants need about ${precipStr(waterNeed)} — water deeply! (⸝⸝˃ ᵕ ˂⸝⸝)` });
+        items.push({ icon: "💧", text: `<strong>heavy watering needed~!</strong> it's a thirsty day — water deeply! (⸝⸝˃ ᵕ ˂⸝⸝)` });
       }
     }
 
@@ -3390,7 +3490,7 @@
 
     // Hide everything first
     [
-      "#current-weather", "#sun-times", "#sun-score-section", "#moon-phase", "#hourly-section",
+      "#current-weather", "#comfort-section", "#sun-times", "#sun-score-section", "#moon-phase", "#hourly-section",
       "#forecast-section", "#attire-section", "#zodiac-section", "#plant-section", "#onthisday-section",
     ].forEach((s) => hide($(s)));
 
@@ -3405,6 +3505,7 @@
     renderAttire(data);
     renderZodiac(data);
     renderPlantCare(data);
+    renderComfortMeter(data);
     renderOnThisDay(data);
     checkSevereOutlook(data);
     fetchWeatherAlerts(data.latitude, data.longitude);
@@ -3799,7 +3900,7 @@
   (function setupSectionDrag() {
     const container = $("#app");
     const sectionIds = [
-      "sun-times", "sun-score-section", "moon-phase", "hourly-section",
+      "comfort-section", "sun-times", "sun-score-section", "moon-phase", "hourly-section",
       "forecast-section", "attire-section", "zodiac-section", "plant-section", "onthisday-section",
     ];
     const sections = sectionIds.map(id => $(`#${id}`)).filter(Boolean);
